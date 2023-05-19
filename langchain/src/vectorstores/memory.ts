@@ -15,6 +15,8 @@ export interface MemoryVectorStoreArgs {
 }
 
 export class MemoryVectorStore extends VectorStore {
+  declare FilterType: (doc: Document) => boolean;
+
   memoryVectors: MemoryVector[] = [];
 
   similarity: typeof ml_distance_similarity.cosine;
@@ -48,9 +50,21 @@ export class MemoryVectorStore extends VectorStore {
 
   async similaritySearchVectorWithScore(
     query: number[],
-    k: number
+    k: number,
+    filter?: this["FilterType"]
   ): Promise<[Document, number][]> {
+    const filterFunction = (memoryVector: MemoryVector) => {
+      if (!filter) {
+        return true;
+      }
+      const doc = new Document({
+        metadata: memoryVector.metadata,
+        pageContent: memoryVector.content,
+      });
+      return filter(doc);
+    };
     const searches = this.memoryVectors
+      .filter(filterFunction)
       .map((vector, index) => ({
         similarity: this.similarity(query, vector.embedding),
         index,

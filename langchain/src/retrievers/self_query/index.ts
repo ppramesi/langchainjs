@@ -8,8 +8,9 @@ import { Document } from "../../document.js";
 import { BaseRetriever } from "../../schema/index.js";
 import { VectorStore } from "../../vectorstores/base.js";
 import { BaseTranslator, BasicTranslator } from "./translator.js";
+import { FunctionalTranslator } from "./functional_translator.js";
 
-export { BaseTranslator, BasicTranslator };
+export { BaseTranslator, BasicTranslator, FunctionalTranslator };
 
 export type SelfQueryRetrieverArgs = {
   vectorStore: VectorStore;

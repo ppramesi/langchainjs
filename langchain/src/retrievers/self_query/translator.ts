@@ -13,26 +13,38 @@ import {
   VisitorStructuredQueryResult,
 } from "../../chains/query_constructor/ir.js";
 
-export abstract class BaseTranslator extends Visitor {
-  abstract allowedOperators: Operator[];
+export type TranslatorOpts = {
+  allowedOperators?: Operator[];
+  allowedComparators?: Comparator[];
+};
 
-  abstract allowedComparators: Comparator[];
+export abstract class BaseTranslator extends Visitor {
+  allowedOperators: Operator[];
+
+  allowedComparators: Comparator[];
+
+  constructor(opts?: TranslatorOpts) {
+    super();
+    this.allowedOperators = opts?.allowedOperators ?? [
+      Operators.and,
+      Operators.or,
+    ];
+    this.allowedComparators = opts?.allowedComparators ?? [
+      Comparators.eq,
+      Comparators.neq,
+      Comparators.gt,
+      Comparators.gte,
+      Comparators.lt,
+      Comparators.lte,
+      Comparators.in,
+      Comparators.nin,
+    ];
+  }
 
   abstract formatFunction(func: Operator | Comparator): string;
 }
 
 export class BasicTranslator extends BaseTranslator {
-  allowedOperators: Operator[] = [Operators.and, Operators.or];
-
-  allowedComparators: Comparator[] = [
-    Comparators.eq,
-    Comparators.neq,
-    Comparators.gt,
-    Comparators.gte,
-    Comparators.lt,
-    Comparators.lte,
-  ];
-
   formatFunction(func: Operator | Comparator): string {
     if (func in Comparators) {
       if (

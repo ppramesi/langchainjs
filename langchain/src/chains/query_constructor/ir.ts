@@ -1,3 +1,5 @@
+import { Document } from "../../document.js";
+
 export type AND = "and";
 export type OR = "or";
 export type NOT = "not";
@@ -9,8 +11,10 @@ export type LT = "lt";
 export type GT = "gt";
 export type LTE = "lte";
 export type GTE = "gte";
+export type IN = "in";
+export type NIN = "nin";
 
-export type Comparator = EQ | LT | GT | LTE | GTE;
+export type Comparator = EQ | LT | GT | LTE | GTE | IN | NIN;
 
 export const Operators: { [key: string]: Operator } = {
   and: "and",
@@ -24,26 +28,41 @@ export const Comparators: { [key: string]: Comparator } = {
   gt: "gt",
   lte: "lte",
   gte: "gte",
+  in: "in",
+  nin: "nin",
 };
+
+export type FunctionFilter = (document: Document) => boolean;
 
 export type VisitorResult =
   | VisitorOperationResult
   | VisitorComparisonResult
   | VisitorStructuredQueryResult;
-export type VisitorOperationResult = {
-  [operator: string]: VisitorResult[];
-};
-export type VisitorComparisonResult = {
-  [attr: string]: {
-    [comparator: string]: string | number;
-  };
-};
-export type VisitorStructuredQueryResult = {
-  filter?:
-    | VisitorStructuredQueryResult
-    | VisitorComparisonResult
-    | VisitorOperationResult;
-};
+
+export type VisitorOperationResult =
+  | {
+      [operator: string]: VisitorResult[];
+    }
+  | FunctionFilter;
+
+export type VisitorComparisonResult =
+  | {
+      [attr: string]: {
+        [comparator: string]: string | number | string[] | number[];
+      };
+    }
+  | FunctionFilter;
+
+export type VisitorStructuredQueryResult =
+  | {
+      filter?:
+        | VisitorStructuredQueryResult
+        | VisitorComparisonResult
+        | VisitorOperationResult;
+    }
+  | {
+      filter?: FunctionFilter;
+    };
 
 export abstract class Visitor {
   abstract allowedOperators: Operator[];
@@ -83,7 +102,7 @@ export class Comparison extends FilterDirective {
   constructor(
     public comparator: Comparator,
     public attribute: string,
-    public value: string | number
+    public value: string | number | string[] | number[]
   ) {
     super();
   }
