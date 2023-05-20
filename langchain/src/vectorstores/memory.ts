@@ -63,8 +63,8 @@ export class MemoryVectorStore extends VectorStore {
       });
       return filter(doc);
     };
-    const searches = this.memoryVectors
-      .filter(filterFunction)
+    const filteredMemoryVectors = this.memoryVectors.filter(filterFunction);
+    const searches = filteredMemoryVectors
       .map((vector, index) => ({
         similarity: this.similarity(query, vector.embedding),
         index,
@@ -74,8 +74,8 @@ export class MemoryVectorStore extends VectorStore {
 
     const result: [Document, number][] = searches.map((search) => [
       new Document({
-        metadata: this.memoryVectors[search.index].metadata,
-        pageContent: this.memoryVectors[search.index].content,
+        metadata: filteredMemoryVectors[search.index].metadata,
+        pageContent: filteredMemoryVectors[search.index].content,
       }),
       search.similarity,
     ]);

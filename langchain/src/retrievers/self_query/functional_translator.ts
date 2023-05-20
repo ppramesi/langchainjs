@@ -18,8 +18,6 @@ type ValueType = {
   lte: string | number;
   gt: string | number;
   gte: string | number;
-  in: (string | number)[];
-  nin: (string | number)[];
 };
 
 export class FunctionalTranslator extends BaseTranslator {
@@ -49,20 +47,6 @@ export class FunctionalTranslator extends BaseTranslator {
       case Comparators.lte: {
         return (a: string | number, b: ValueType[C]) => a <= b;
       }
-      case Comparators.in: {
-        return (a: string | number, b: ValueType[C]) => {
-          if (!Array.isArray(b))
-            throw new Error("Comparator value not an array");
-          return b.includes(a);
-        };
-      }
-      case Comparators.nin: {
-        return (a: string | number, b: ValueType[C]) => {
-          if (!Array.isArray(b))
-            throw new Error("Comparator value not an array");
-          return !b.includes(a);
-        };
-      }
       default: {
         throw new Error("Unknown comparator");
       }
@@ -71,7 +55,7 @@ export class FunctionalTranslator extends BaseTranslator {
 
   visitOperation(operation: Operation): FunctionFilter {
     const { operator, args } = operation;
-    if (operator in this.allowedOperators) {
+    if (this.allowedOperators.includes(operator)) {
       if (operator === Operators.and) {
         return (document: Document) => {
           if (!args) {
@@ -112,7 +96,7 @@ export class FunctionalTranslator extends BaseTranslator {
 
   visitComparison(comparison: Comparison): FunctionFilter {
     const { comparator, attribute, value } = comparison;
-    const undefinedTrue = [Comparators.neq, Comparators.nin];
+    const undefinedTrue = [Comparators.neq];
     if (this.allowedComparators.includes(comparator)) {
       const comparatorFunction = this.getComparatorFunction(comparator);
       return (document: Document) => {

@@ -36,8 +36,6 @@ export abstract class BaseTranslator extends Visitor {
       Comparators.gte,
       Comparators.lt,
       Comparators.lte,
-      Comparators.in,
-      Comparators.nin,
     ];
   }
 

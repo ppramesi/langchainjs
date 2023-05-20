@@ -96,26 +96,11 @@ const vectorStore = await Chroma.fromDocuments(docs, embeddings, {
   collectionName: "a-movie-collection",
 });
 
-/**
- * For Chroma DB, we need to remove some comparators from
- * allowed comparators because Chroma DB does not support
- * in and nin.
- */
-const allowedComparators = [
-  Comparators.eq,
-  Comparators.neq,
-  Comparators.gt,
-  Comparators.gte,
-  Comparators.lt,
-  Comparators.lte,
-];
-
 const selfQueryRetriever = await SelfQueryRetriever.fromLLM({
   llm,
   vectorStore,
   documentContents,
   attributeInfo,
-  allowedComparators,
   /**
    * We need to create a basic translator that translates the queries into a
    * filter format that the vector store can understand. We provide a basic translator
@@ -124,7 +109,7 @@ const selfQueryRetriever = await SelfQueryRetriever.fromLLM({
    * vector store needs to support filtering on the metadata attributes you want to
    * query on.
    */
-  structuredQueryTranslator: new BasicTranslator({ allowedComparators }),
+  structuredQueryTranslator: new BasicTranslator(),
 });
 
 /**
