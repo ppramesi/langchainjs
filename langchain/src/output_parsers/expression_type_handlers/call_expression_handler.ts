@@ -1,6 +1,7 @@
 import type { ESTree } from "meriyah";
 import { NodeHandler, ASTParser } from "./base.js";
 import { CallExpressionType, MemberExpressionType } from "./types.js";
+import { IdentifierHandler } from "./identifier_handler.js";
 
 export class CallExpressionHandler extends NodeHandler {
   async accepts(node: ESTree.Node): Promise<ESTree.CallExpression | boolean> {
@@ -31,7 +32,9 @@ export class CallExpressionHandler extends NodeHandler {
     const { callee } = node;
     let funcCall;
     if (ASTParser.isIdentifier(callee)) {
-      funcCall = callee.name.replace(/^["'](.+(?=["']$))["']$/, "$1");
+      const identifierHandler = new IdentifierHandler(this.parentHandler);
+      const identifier = await identifierHandler.handle(callee);
+      funcCall = identifier.value;
     } else if (ASTParser.isMemberExpression(callee)) {
       funcCall = (await this.parentHandler.handle(
         callee as ESTree.MemberExpression

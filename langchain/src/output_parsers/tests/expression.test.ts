@@ -241,6 +241,65 @@ const correctExps = [
       },
     ],
   },
+  {
+    type: "call_expression",
+    funcCall: "and",
+    args: [
+      {
+        type: "call_expression",
+        funcCall: "in",
+        args: [
+          { type: "string_literal", value: "a" },
+          {
+            type: "array_literal",
+            values: [
+              { type: "string_literal", value: "a" },
+              { type: "string_literal", value: "b" },
+              { type: "string_literal", value: "c" },
+            ],
+          },
+        ],
+      },
+      {
+        type: "call_expression",
+        funcCall: "eq",
+        args: [
+          { type: "string_literal", value: "a" },
+          { type: "string_literal", value: "b" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "call_expression",
+    funcCall: "in",
+    args: [
+      {
+        type: "call_expression",
+        funcCall: "const",
+        args: [
+          { type: "string_literal", value: "a" },
+          {
+            type: "array_literal",
+            values: [
+              { type: "string_literal", value: "a" },
+              { type: "string_literal", value: "b" },
+              { type: "string_literal", value: "c" },
+            ],
+          },
+        ],
+      },
+      {
+        type: "call_expression",
+        funcCall: "eq",
+        args: [
+          { type: "string_literal", value: "a" },
+          { type: "string_literal", value: "b" },
+          { type: "boolean_literal", value: true },
+        ],
+      },
+    ],
+  },
 ];
 
 test("ExpressionParser multiple expressions test", async () => {
@@ -256,6 +315,8 @@ test("ExpressionParser multiple expressions test", async () => {
     `hello.world("hello", "world", ["hello", "world"], {"hello": "world"})`,
     `hello["world"]("hello", "world", ["hello", "world"])`,
     `a(b, c(d, e, [f, g], {h: i}))`,
+    `and(in("a", ["a", "b", "c"]), eq("a", "b"))`,
+    `in(const("a", ["a", "b", "c"]), eq("a", "b", true))`,
   ];
   const badExpressions = [
     `hello(`,

@@ -1,6 +1,7 @@
 import type { ESTree } from "meriyah";
 import { NodeHandler, ASTParser } from "./base.js";
 import { PropertyAssignmentType } from "./types.js";
+import { IdentifierHandler } from "./identifier_handler.js";
 
 export class PropertyAssignmentHandler extends NodeHandler {
   async accepts(node: ESTree.Node): Promise<ESTree.Property | boolean> {
@@ -19,7 +20,9 @@ export class PropertyAssignmentHandler extends NodeHandler {
     }
     let name;
     if (ASTParser.isIdentifier(node.key)) {
-      name = node.key.name;
+      const identifierHandler = new IdentifierHandler(this.parentHandler);
+      const handledIdentifier = await identifierHandler.handle(node.key);
+      name = handledIdentifier.value;
     } else if (ASTParser.isStringLiteral(node.key)) {
       name = node.key.value;
     } else {

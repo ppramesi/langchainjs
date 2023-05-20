@@ -17,7 +17,15 @@ export class IdentifierHandler extends NodeHandler {
         "ArrayLiteralExpressionHandler must have a parent handler"
       );
     }
-    const text = node.name.replace(/^["'](.+(?=["']$))["']$/, "$1");
-    return { type: "identifier", value: text };
+
+    return { type: "identifier", value: this.extractIdentifierName(node) };
+  }
+
+  extractIdentifierName(node: ESTree.Identifier) {
+    let name = node.name.replace(/^["'](.+(?=["']$))["']$/, "$1");
+    if (name.startsWith("$$") && name.endsWith("$$")) {
+      name = name.replaceAll("$$", "");
+    }
+    return name;
   }
 }

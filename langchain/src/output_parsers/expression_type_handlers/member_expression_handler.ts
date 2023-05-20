@@ -1,6 +1,7 @@
 import type { ESTree } from "meriyah";
 import { NodeHandler, ASTParser } from "./base.js";
 import { MemberExpressionType } from "./types.js";
+import { IdentifierHandler } from "./identifier_handler.js";
 
 export class MemberExpressionHandler extends NodeHandler {
   async accepts(node: ESTree.Node): Promise<ESTree.MemberExpression | boolean> {
@@ -20,7 +21,9 @@ export class MemberExpressionHandler extends NodeHandler {
     const { object, property } = node;
     let prop: string;
     if (ASTParser.isIdentifier(property)) {
-      prop = property.name.replace(/^["'](.+(?=["']$))["']$/, "$1");
+      const identifierHandler = new IdentifierHandler(this.parentHandler);
+      const handledIdentifier = await identifierHandler.handle(property);
+      prop = handledIdentifier.value;
     } else if (ASTParser.isStringLiteral(property)) {
       prop = (`${property.value}` as string).replace(
         /^["'](.+(?=["']$))["']$/,
@@ -31,7 +34,9 @@ export class MemberExpressionHandler extends NodeHandler {
     }
     let identifier: string;
     if (ASTParser.isIdentifier(object)) {
-      identifier = object.name.replace(/^["'](.+(?=["']$))["']$/, "$1");
+      const identifierHandler = new IdentifierHandler(this.parentHandler);
+      const handledIdentifier = await identifierHandler.handle(object);
+      identifier = handledIdentifier.value;
     } else if (ASTParser.isLiteral(object)) {
       identifier = (`${object.value}` as string).replace(
         /^["'](.+(?=["']$))["']$/,
