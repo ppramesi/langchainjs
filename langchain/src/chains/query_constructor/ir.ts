@@ -7,6 +7,7 @@ export type NOT = "not";
 export type Operator = AND | OR | NOT;
 
 export type EQ = "eq";
+export type NEQ = "neq";
 export type LT = "lt";
 export type GT = "gt";
 export type LTE = "lte";
@@ -14,7 +15,7 @@ export type GTE = "gte";
 export type IN = "in";
 export type NIN = "nin";
 
-export type Comparator = EQ | LT | GT | LTE | GTE | IN | NIN;
+export type Comparator = EQ | NEQ | LT | GT | LTE | GTE | IN | NIN;
 
 export const Operators: { [key: string]: Operator } = {
   and: "and",
@@ -24,6 +25,7 @@ export const Operators: { [key: string]: Operator } = {
 
 export const Comparators: { [key: string]: Comparator } = {
   eq: "eq",
+  neq: "neq",
   lt: "lt",
   gt: "gt",
   lte: "lte",

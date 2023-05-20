@@ -113,7 +113,7 @@ export class FunctionalTranslator extends BaseTranslator {
   visitComparison(comparison: Comparison): FunctionFilter {
     const { comparator, attribute, value } = comparison;
     const undefinedTrue = [Comparators.neq, Comparators.nin];
-    if (comparator in this.allowedComparators) {
+    if (this.allowedComparators.includes(comparator)) {
       const comparatorFunction = this.getComparatorFunction(comparator);
       return (document: Document) => {
         const documentValue = document.metadata[attribute];

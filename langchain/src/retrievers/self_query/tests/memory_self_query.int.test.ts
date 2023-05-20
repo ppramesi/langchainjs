@@ -74,7 +74,9 @@ test("Memory Vector Store Self Query Retriever Test", async () => {
   ];
 
   const embeddings = new OpenAIEmbeddings();
-  const llm = new OpenAI();
+  const llm = new OpenAI({
+    modelName: "gpt-3.5-turbo"
+  });
   const documentContents = "Brief summary of a movie";
   const vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
   const selfQueryRetriever = await SelfQueryRetriever.fromLLM({
