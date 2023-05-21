@@ -7,9 +7,13 @@ import { StructuredQuery } from "../../chains/query_constructor/ir.js";
 import { Document } from "../../document.js";
 import { BaseRetriever } from "../../schema/index.js";
 import { VectorStore } from "../../vectorstores/base.js";
-import { BaseTranslator, BasicTranslator } from "./translator.js";
+import {
+  TranslatorOptions,
+  BaseTranslator,
+  BasicTranslator,
+} from "./translator.js";
 
-export { BaseTranslator, BasicTranslator };
+export { TranslatorOptions, BaseTranslator, BasicTranslator };
 
 export type SelfQueryRetrieverArgs = {
   vectorStore: VectorStore;

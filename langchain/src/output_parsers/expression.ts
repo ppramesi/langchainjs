@@ -21,27 +21,10 @@ import { ASTParser } from "./expression_type_handlers/base.js";
  *      ]
  */
 
-type ParserError = {
-  index: number;
-  line: number;
-  column: number;
-  description: string;
-  loc: {
-    line: number;
-    column: number;
-  };
-};
-
 const reservedWords = [
-  "abstract",
-  "arguments",
-  "await",
-  "boolean",
   "break",
-  "byte",
   "case",
   "catch",
-  "char",
   "class",
   "const",
   "continue",
@@ -49,79 +32,64 @@ const reservedWords = [
   "default",
   "delete",
   "do",
-  "double",
   "else",
   "enum",
-  "eval",
   "export",
   "extends",
-  "false",
-  "final",
   "finally",
-  "float",
   "for",
   "function",
-  "goto",
   "if",
-  "implements",
   "import",
   "in",
   "instanceof",
-  "int",
-  "interface",
-  "let",
-  "long",
-  "native",
   "new",
-  "null",
-  "package",
-  "private",
-  "protected",
-  "public",
   "return",
-  "short",
-  "static",
   "super",
   "switch",
-  "synchronized",
-  "this",
   "throw",
-  "throws",
-  "transient",
-  "true",
   "try",
   "typeof",
   "var",
   "void",
-  "volatile",
   "while",
   "with",
-  "yield",
 ];
+const reservedRegexes = reservedWords.map((word) => (input: string) => {
+  const pattern = new RegExp(
+    `(?<!['"]|\\$\\$)\\b${word}\\b(?!['"]|\\$\\$)`,
+    "i"
+  );
+  const match = pattern.exec(input);
+  return match ? { index: match.index, word } : null;
+});
+
 const splitOn = (slicable: string, ...indices: number[]) =>
   [0, ...indices].map((n, i, m) => slicable.slice(n, m[i + 1]));
 
 export class ExpressionParser extends BaseOutputParser<ParsedType> {
+  constructor(private allowReservedWords: boolean = true) {
+    super();
+  }
+
   async parse(text: string): Promise<ParsedType> {
     const parse = await ASTParser.importASTParser();
     let program: ESTree.Program;
     try {
       program = parse(text);
     } catch (err) {
-      const error = err as ParserError;
-      if (error.description.includes("Unexpected token: ")) {
-        const pattern = /\[(\d+):(\d+)\]: Unexpected token: '(.*)'/;
-        const match = error.description.match(pattern);
-        if (match && match[3] && reservedWords.includes(match[3])) {
-          const split = splitOn(
-            text,
-            error.column - match[3].length,
-            error.column
-          );
-          split[1] = `$$${split[1]}$$`;
-          return this.parse(split.join(""));
+      if (this.allowReservedWords) {
+        for (const regex of reservedRegexes) {
+          const regexResult = regex(text);
+          if (regexResult !== null) {
+            const { index, word } = regexResult;
+            const split = splitOn(text, index, index + word.length);
+            split[1] = `$$${split[1]}$$`;
+            return this.parse(split.join(""));
+          }
         }
       }
+
       throw new Error(`Error parsing ${err}: ${text}`);
     }
 

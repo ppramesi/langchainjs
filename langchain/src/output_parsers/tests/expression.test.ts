@@ -272,7 +272,7 @@ const correctExps = [
   },
   {
     type: "call_expression",
-    funcCall: "in",
+    funcCall: "with",
     args: [
       {
         type: "call_expression",
@@ -316,7 +316,7 @@ test("ExpressionParser multiple expressions test", async () => {
     `hello["world"]("hello", "world", ["hello", "world"])`,
     `a(b, c(d, e, [f, g], {h: i}))`,
     `and(in("a", ["a", "b", "c"]), eq("a", "b"))`,
-    `in(const("a", ["a", "b", "c"]), eq("a", "b", true))`,
+    `with(const("a", ["a", "b", "c"]), eq("a", "b", true))`,
   ];
   const badExpressions = [
     `hello(`,
@@ -328,14 +328,16 @@ test("ExpressionParser multiple expressions test", async () => {
     parser.parse(expression)
   );
   const badExpressionsPromise = badExpressions.map((expression) =>
-    parser.parse(expression)
+    parser.parse(expression).catch(() => "bad")
   );
 
-  try {
-    await Promise.all(badExpressionsPromise).catch(() => "bad");
-  } catch (err) {
-    expect(err).toBe("bad");
-  }
+  await Promise.allSettled(badExpressionsPromise).then((errors) => {
+    errors.forEach((err) => {
+      if (err.status === "fulfilled") {
+        expect(err.value).toBe("bad");
+      }
+    });
+  });
 
   const parsed = await Promise.all(parsedPromise);
   parsed.forEach((expression, index) => {
