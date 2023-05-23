@@ -102,7 +102,7 @@ const vectorStore = await Chroma.fromDocuments(docs, embeddings, {
  */
 const allowedComparators = [
   Comparators.eq,
-  Comparators.neq,
+  Comparators.ne,
   Comparators.gt,
   Comparators.gte,
   Comparators.lt,

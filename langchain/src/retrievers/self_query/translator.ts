@@ -31,7 +31,7 @@ export abstract class BaseTranslator extends Visitor {
     ];
     this.allowedComparators = opts?.allowedComparators ?? [
       Comparators.eq,
-      Comparators.neq,
+      Comparators.ne,
       Comparators.gt,
       Comparators.gte,
       Comparators.lt,
