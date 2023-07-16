@@ -3,7 +3,11 @@ import type {
   SpaceName,
 } from "hnswlib-node";
 import { Embeddings } from "../embeddings/base.js";
-import { SaveableVectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  SaveableVectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 import { SynchronousInMemoryDocstore } from "../stores/doc/in_memory.js";
 
@@ -18,6 +22,8 @@ export interface HNSWLibArgs extends HNSWLibBase {
 }
 
 export class HNSWLib extends SaveableVectorStore {
+  lc_serializable = true;
+
   declare FilterType: (doc: Document) => boolean;
 
   _index?: HierarchicalNSWT;
@@ -30,12 +36,23 @@ export class HNSWLib extends SaveableVectorStore {
     return "hnswlib";
   }
 
-  constructor(embeddings: Embeddings, args: HNSWLibArgs) {
-    super(embeddings, args);
-    this._index = args.index;
-    this.args = args;
+  constructor(fields: VectorStoreInput<HNSWLibArgs>);
+
+  constructor(embeddings: Embeddings, args: HNSWLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<HNSWLibArgs>,
+    extrArgs?: HNSWLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { docstore, ...rest },
+    } = HNSWLib.unrollFields<HNSWLibArgs>(fieldsOrEmbeddings, extrArgs);
+    super({ embeddings, ...rest });
+    this._index = rest.index;
+    this.args = rest;
     this.embeddings = embeddings;
-    this.docstore = args?.docstore ?? new SynchronousInMemoryDocstore();
+    this.docstore = docstore ?? new SynchronousInMemoryDocstore();
   }
 
   async addDocuments(documents: Document[]): Promise<void> {

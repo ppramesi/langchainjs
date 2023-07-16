@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 import { BaseRetriever, BaseRetrieverInput } from "../schema/retriever.js";
@@ -7,7 +8,6 @@ import {
   Callbacks,
 } from "../callbacks/manager.js";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AddDocumentOptions = Record<string, any>;
 
 export interface VectorStoreRetrieverInput<V extends VectorStore>
@@ -20,6 +20,8 @@ export interface VectorStoreRetrieverInput<V extends VectorStore>
 export class VectorStoreRetriever<
   V extends VectorStore = VectorStore
 > extends BaseRetriever {
+  lc_serializable = true;
+
   get lc_namespace() {
     return ["langchain", "retrievers", this._vectorstoreType()];
   }
@@ -61,6 +63,14 @@ export class VectorStoreRetriever<
   }
 }
 
+export type VectorStoreInput<T extends { [k: string]: any }> = T & {
+  embeddings: Embeddings;
+};
+
+export type BaseVectorStoreFields<T extends { [k: string]: any }> =
+  | VectorStoreInput<T>
+  | Embeddings;
+
 export abstract class VectorStore extends Serializable {
   declare FilterType: object;
 
@@ -68,9 +78,19 @@ export abstract class VectorStore extends Serializable {
 
   embeddings: Embeddings;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(embeddings: Embeddings, dbConfig: Record<string, any>) {
-    super(dbConfig);
+  constructor(fields: VectorStoreInput<{ [k: string]: any }>);
+
+  constructor(embeddings: Embeddings, dbConfig: { [k: string]: any });
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<{ [k: string]: any }>,
+    extrArgs?: { [k: string]: any }
+  ) {
+    const { embeddings, args } = VectorStore.unrollFields<{ [k: string]: any }>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
     this.embeddings = embeddings;
   }
 
@@ -87,7 +107,6 @@ export abstract class VectorStore extends Serializable {
     options?: AddDocumentOptions
   ): Promise<string[] | void>;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async delete(_params?: Record<string, any>): Promise<void> {
     throw new Error("Not implemented.");
   }
@@ -130,7 +149,6 @@ export abstract class VectorStore extends Serializable {
     _texts: string[],
     _metadatas: object[] | object,
     _embeddings: Embeddings,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     _dbConfig: Record<string, any>
   ): Promise<VectorStore> {
     throw new Error(
@@ -141,12 +159,36 @@ export abstract class VectorStore extends Serializable {
   static fromDocuments(
     _docs: Document[],
     _embeddings: Embeddings,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     _dbConfig: Record<string, any>
   ): Promise<VectorStore> {
     throw new Error(
       "the Langchain vectorstore implementation you are using forgot to override this, please report a bug"
     );
+  }
+
+  static unrollFields<T extends { [k: string]: any }>(
+    fieldsOrEmbeddings: BaseVectorStoreFields<T>,
+    extrArgs?: T
+  ) {
+    let embeddings: Embeddings;
+    let args: T;
+    if (
+      "embeddings" in fieldsOrEmbeddings &&
+      // eslint-disable-next-line no-instanceof/no-instanceof
+      fieldsOrEmbeddings.embeddings instanceof Embeddings
+    ) {
+      const { embeddings: tempEmbeddings, ...tempArgs } = fieldsOrEmbeddings;
+      return { embeddings: tempEmbeddings, args: tempArgs };
+      // eslint-disable-next-line no-instanceof/no-instanceof
+    } else if (fieldsOrEmbeddings instanceof Embeddings && extrArgs) {
+      args = extrArgs;
+      embeddings = fieldsOrEmbeddings;
+      return { embeddings, args };
+    } else {
+      throw new Error(
+        "Second argument is required if first parameter is an embedding"
+      );
+    }
   }
 
   asRetriever(

@@ -1,5 +1,9 @@
 import { similarity as ml_distance_similarity } from "ml-distance";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -15,6 +19,8 @@ export interface MemoryVectorStoreArgs {
 }
 
 export class MemoryVectorStore extends VectorStore {
+  lc_serializable = true;
+
   declare FilterType: (doc: Document) => boolean;
 
   memoryVectors: MemoryVector[] = [];
@@ -25,11 +31,21 @@ export class MemoryVectorStore extends VectorStore {
     return "memory";
   }
 
+  constructor(fields: VectorStoreInput<MemoryVectorStoreArgs>);
+
+  constructor(embeddings: Embeddings, args?: MemoryVectorStoreArgs);
+
   constructor(
-    embeddings: Embeddings,
-    { similarity, ...rest }: MemoryVectorStoreArgs = {}
+    fieldsOrEmbeddings: BaseVectorStoreFields<MemoryVectorStoreArgs>,
+    extrArgs: MemoryVectorStoreArgs = {}
   ) {
-    super(embeddings, rest);
+    const { embeddings, args } =
+      MemoryVectorStore.unrollFields<MemoryVectorStoreArgs>(
+        fieldsOrEmbeddings,
+        extrArgs
+      );
+    const { similarity, ...rest } = args;
+    super({ embeddings, ...rest });
 
     this.similarity = similarity ?? ml_distance_similarity.cosine;
   }

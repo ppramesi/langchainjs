@@ -4,7 +4,11 @@ import type {
   WeaviateClient,
   WhereFilter,
 } from "weaviate-ts-client";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -84,10 +88,24 @@ export class WeaviateStore extends VectorStore {
     return "weaviate";
   }
 
-  constructor(public embeddings: Embeddings, args: WeaviateLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<WeaviateLibArgs>);
 
-    this.client = args.client;
+  constructor(embeddings: Embeddings, args: WeaviateLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<WeaviateLibArgs>,
+    extrArgs?: WeaviateLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { client, ...args },
+    } = WeaviateStore.unrollFields<WeaviateLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+
+    this.client = client;
     this.indexName = args.indexName;
     this.textKey = args.textKey || "text";
     this.queryAttrs = [this.textKey];

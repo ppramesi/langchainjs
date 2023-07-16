@@ -3,7 +3,11 @@ import type {
   Collection,
   Document as MongoDocument,
 } from "mongodb";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -32,10 +36,24 @@ export class MongoVectorStore extends VectorStore {
     return "mongodb";
   }
 
-  constructor(embeddings: Embeddings, args: MongoLibArgs) {
-    super(embeddings, args);
-    this.collection = args.collection;
-    this.client = args.client;
+  constructor(fields: VectorStoreInput<MongoLibArgs>);
+
+  constructor(embeddings: Embeddings, args: MongoLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<MongoLibArgs>,
+    extrArgs?: MongoLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { collection, client, ...args },
+    } = MongoVectorStore.unrollFields<MongoLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+    this.collection = collection;
+    this.client = client;
     this.indexName = args.indexName || "default";
   }
 

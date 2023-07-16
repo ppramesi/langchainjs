@@ -2,7 +2,11 @@ import * as uuid from "uuid";
 import type { VectorDocumentStore as VectorDocumentStoreT } from "@tigrisdata/vector";
 
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 
 export type TigrisLibArgs = {
@@ -16,8 +20,19 @@ export class TigrisVectorStore extends VectorStore {
     return "tigris";
   }
 
-  constructor(embeddings: Embeddings, args: TigrisLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<TigrisLibArgs>);
+
+  constructor(embeddings: Embeddings, args: TigrisLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<TigrisLibArgs>,
+    extrArgs?: TigrisLibArgs
+  ) {
+    const { embeddings, args } = TigrisVectorStore.unrollFields<TigrisLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
 
     this.embeddings = embeddings;
     this.index = args.index;

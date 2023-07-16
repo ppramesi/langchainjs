@@ -2,7 +2,11 @@ import type { IndexFlatL2 } from "faiss-node";
 import type { NameRegistry, Parser } from "pickleparser";
 import * as uuid from "uuid";
 import { Embeddings } from "../embeddings/base.js";
-import { SaveableVectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  SaveableVectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 import { SynchronousInMemoryDocstore } from "../stores/doc/in_memory.js";
 
@@ -13,6 +17,8 @@ export interface FaissLibArgs {
 }
 
 export class FaissStore extends SaveableVectorStore {
+  lc_serializable = true;
+
   _index?: IndexFlatL2;
 
   _mapping: Record<number, string>;
@@ -25,13 +31,24 @@ export class FaissStore extends SaveableVectorStore {
     return "faiss";
   }
 
-  constructor(embeddings: Embeddings, args: FaissLibArgs) {
-    super(embeddings, args);
-    this.args = args;
-    this._index = args.index;
-    this._mapping = args.mapping ?? {};
+  constructor(fields: VectorStoreInput<FaissLibArgs>);
+
+  constructor(embeddings: Embeddings, args: FaissLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<FaissLibArgs>,
+    extrArgs?: FaissLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { docstore, ...rest },
+    } = FaissStore.unrollFields<FaissLibArgs>(fieldsOrEmbeddings, extrArgs);
+    super({ embeddings, ...rest });
+    this.args = rest;
+    this._index = rest.index;
+    this._mapping = rest.mapping ?? {};
     this.embeddings = embeddings;
-    this.docstore = args?.docstore ?? new SynchronousInMemoryDocstore();
+    this.docstore = docstore ?? new SynchronousInMemoryDocstore();
   }
 
   async addDocuments(documents: Document[]) {

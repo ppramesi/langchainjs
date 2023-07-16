@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PostgrestFilterBuilder } from "@supabase/postgrest-js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -23,17 +27,31 @@ interface SearchEmbeddingsResponse {
   similarity: number;
 }
 
-export interface SupabaseLibArgs {
-  client: SupabaseClient;
+export type SupabaseLibArgs = (
+  | {
+      client: SupabaseClient;
+    }
+  | {
+      url: string;
+      privateKey: string;
+    }
+) & {
   tableName?: string;
   queryName?: string;
   filter?: SupabaseMetadata | SupabaseFilterRPCCall;
-}
+};
 
 export class SupabaseVectorStore extends VectorStore {
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      url: "SUPABASE_VECTOR_STORE_URL",
+      privateKey: "SUPABASE_VECTOR_STORE_PRIVATE_KEY",
+    };
+  }
+
   declare FilterType: SupabaseMetadata | SupabaseFilterRPCCall;
 
-  client: SupabaseClient;
+  client?: SupabaseClient;
 
   tableName: string;
 
@@ -41,17 +59,67 @@ export class SupabaseVectorStore extends VectorStore {
 
   filter?: SupabaseMetadata | SupabaseFilterRPCCall;
 
+  url?: string;
+
+  privateKey?: string;
+
   vectorstoreType(): string {
     return "supabase";
   }
 
-  constructor(embeddings: Embeddings, args: SupabaseLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<SupabaseLibArgs>);
 
-    this.client = args.client;
+  constructor(embeddings: Embeddings, args: SupabaseLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<SupabaseLibArgs>,
+    extrArgs?: SupabaseLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { ...args },
+    } = SupabaseVectorStore.unrollFields<SupabaseLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+
+    if ("client" in args && args.client) {
+      this.client = args.client;
+      this.lc_serializable = false;
+    } else if ("privateKey" in args && args.privateKey) {
+      this.url = args.url;
+      this.privateKey = args.privateKey;
+      this.lc_serializable = true;
+    } else {
+      throw new Error("Requires either Supabase client or URL and private key");
+    }
     this.tableName = args.tableName || "documents";
     this.queryName = args.queryName || "match_documents";
     this.filter = args.filter;
+  }
+
+  async ensureClient(): Promise<SupabaseClient> {
+    if (!this.client) {
+      if (this.url && this.privateKey) {
+        const { createClient } = await SupabaseVectorStore.importCreateClient();
+        this.client = createClient(this.url, this.privateKey);
+      } else {
+        throw new Error("Cannot find url or private key");
+      }
+    }
+    return this.client;
+  }
+
+  static async importCreateClient() {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      return { createClient };
+    } catch (error) {
+      throw new Error(
+        "Please install Supabase as a dependency with, e.g. `npm install -S Supabase`"
+      );
+    }
   }
 
   async addDocuments(documents: Document[], options?: { ids?: string[] }) {
@@ -86,7 +154,10 @@ export class SupabaseVectorStore extends VectorStore {
         return row;
       });
 
-      const res = await this.client.from(this.tableName).upsert(chunk).select();
+      const res = await (await this.ensureClient())
+        .from(this.tableName)
+        .upsert(chunk)
+        .select();
       if (res.error) {
         throw new Error(
           `Error inserting: ${res.error.message} ${res.status} ${res.statusText}`
@@ -102,7 +173,10 @@ export class SupabaseVectorStore extends VectorStore {
   async delete(params: { ids: string[] }): Promise<void> {
     const { ids } = params;
     for (const id of ids) {
-      await this.client.from(this.tableName).delete().eq("id", id);
+      await (await this.ensureClient())
+        .from(this.tableName)
+        .delete()
+        .eq("id", id);
     }
   }
 
@@ -131,7 +205,10 @@ export class SupabaseVectorStore extends VectorStore {
       throw new Error("invalid filter type");
     }
 
-    const rpcCall = this.client.rpc(this.queryName, matchDocumentsParams);
+    const rpcCall = (await this.ensureClient()).rpc(
+      this.queryName,
+      matchDocumentsParams
+    );
 
     const { data: searches, error } = await filterFunction(rpcCall);
 

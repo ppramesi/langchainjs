@@ -8,7 +8,11 @@ import type {
 } from "mysql2/promise";
 import { format } from "mysql2";
 import { createPool } from "mysql2/promise";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -79,6 +83,18 @@ function withConnectAttributes(
 }
 
 export class SingleStoreVectorStore extends VectorStore {
+  lc_serializable = true;
+
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      "connectionOptions.host": "SINGLESTORE_HOST",
+      "connectionOptions.port": "SINGLESTORE_PORT",
+      "connectionOptions.user": "SINGLESTORE_USERNAME",
+      "connectionOptions.password": "SINGLESTORE_PASSWORD",
+      "connectionOptions.database": "SINGLESTORE_DATABASE",
+    };
+  }
+
   connectionPool: Pool;
 
   tableName: string;
@@ -95,9 +111,24 @@ export class SingleStoreVectorStore extends VectorStore {
     return "single_store";
   }
 
-  constructor(embeddings: Embeddings, config: SingleStoreVectorStoreConfig) {
-    super(embeddings, config);
-    this.connectionPool = createPool(withConnectAttributes(config));
+  constructor(fields: VectorStoreInput<SingleStoreVectorStoreConfig>);
+
+  constructor(embeddings: Embeddings, args: SingleStoreVectorStoreConfig);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<SingleStoreVectorStoreConfig>,
+    extrArgs?: SingleStoreVectorStoreConfig
+  ) {
+    const { embeddings, args: config } =
+      SingleStoreVectorStore.unrollFields<SingleStoreVectorStoreConfig>(
+        fieldsOrEmbeddings,
+        extrArgs
+      );
+    super({ embeddings, ...config });
+
+    this.connectionPool = createPool(
+      withConnectAttributes(config as SingleStoreVectorStoreConfig)
+    );
     this.tableName = config.tableName ?? "embeddings";
     this.contentColumnName = config.contentColumnName ?? "content";
     this.vectorColumnName = config.vectorColumnName ?? "vector";

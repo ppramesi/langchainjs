@@ -2,7 +2,11 @@ import * as uuid from "uuid";
 import { ClickHouseClient, createClient } from "@clickhouse/client";
 
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 
 export interface MyScaleLibArgs {
@@ -33,6 +37,17 @@ export interface MyScaleFilter {
 }
 
 export class MyScaleStore extends VectorStore {
+  lc_serializable = true;
+
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      host: "MYSCALE_HOST",
+      port: "MYSCALE_PORT",
+      username: "MYSCALE_USERNAME",
+      password: "MYSCALE_PASSWORD",
+    };
+  }
+
   declare FilterType: MyScaleFilter;
 
   private client: ClickHouseClient;
@@ -55,8 +70,19 @@ export class MyScaleStore extends VectorStore {
     return "myscale";
   }
 
-  constructor(embeddings: Embeddings, args: MyScaleLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<MyScaleLibArgs>);
+
+  constructor(embeddings: Embeddings, args: MyScaleLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<MyScaleLibArgs>,
+    extrArgs?: MyScaleLibArgs
+  ) {
+    const { embeddings, args } = MyScaleStore.unrollFields<MyScaleLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
 
     this.indexType = args.indexType || "IVFFLAT";
     this.indexParam = args.indexParam || {};

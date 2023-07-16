@@ -1,5 +1,9 @@
 import { Table } from "vectordb";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -9,12 +13,25 @@ export type LanceDBArgs = {
 };
 
 export class LanceDB extends VectorStore {
+  lc_serializable = true;
+
   private table: Table;
 
   private textKey: string;
 
-  constructor(embeddings: Embeddings, args: LanceDBArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<LanceDBArgs>);
+
+  constructor(embeddings: Embeddings, args: LanceDBArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<LanceDBArgs>,
+    extrArgs?: LanceDBArgs
+  ) {
+    const { embeddings, args } = LanceDB.unrollFields<LanceDBArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
     this.table = args.table;
     this.embeddings = embeddings;
     this.textKey = args.textKey || "text";

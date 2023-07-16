@@ -8,7 +8,11 @@ import {
 } from "@zilliz/milvus2-sdk-node";
 
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 import { getEnvironmentVariable } from "../util/env.js";
 
@@ -48,6 +52,8 @@ const MILVUS_TEXT_FIELD_NAME = "langchain_text";
 const MILVUS_COLLECTION_NAME_PREFIX = "langchain_col";
 
 export class Milvus extends VectorStore {
+  lc_serializable = true;
+
   get lc_secrets(): { [key: string]: string } {
     return {
       ssl: "MILVUS_SSL",
@@ -96,8 +102,19 @@ export class Milvus extends VectorStore {
     return "milvus";
   }
 
-  constructor(embeddings: Embeddings, args: MilvusLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<MilvusLibArgs>);
+
+  constructor(embeddings: Embeddings, args: MilvusLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<MilvusLibArgs>,
+    extrArgs?: MilvusLibArgs
+  ) {
+    const { embeddings, args } = Milvus.unrollFields<MilvusLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
     this.embeddings = embeddings;
     this.collectionName = args.collectionName ?? genCollectionName();
     this.textField = args.textField ?? MILVUS_TEXT_FIELD_NAME;

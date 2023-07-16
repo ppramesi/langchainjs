@@ -6,7 +6,11 @@ import type {
 } from "redis";
 import { SchemaFieldTypes, VectorAlgorithms } from "redis";
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 
 // Adapated from internal redis types which aren't exported
@@ -78,20 +82,34 @@ export class RedisVectorStore extends VectorStore {
     return "redis";
   }
 
-  constructor(embeddings: Embeddings, _dbConfig: RedisVectorStoreConfig) {
-    super(embeddings, _dbConfig);
+  constructor(fields: VectorStoreInput<RedisVectorStoreConfig>);
 
-    this.redisClient = _dbConfig.redisClient;
-    this.indexName = _dbConfig.indexName;
-    this.indexOptions = _dbConfig.indexOptions ?? {
+  constructor(embeddings: Embeddings, args: RedisVectorStoreConfig);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<RedisVectorStoreConfig>,
+    extrArgs?: RedisVectorStoreConfig
+  ) {
+    const {
+      embeddings,
+      args: { redisClient, ...args },
+    } = RedisVectorStore.unrollFields<RedisVectorStoreConfig>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+
+    this.redisClient = redisClient;
+    this.indexName = args.indexName;
+    this.indexOptions = args.indexOptions ?? {
       ALGORITHM: VectorAlgorithms.HNSW,
       DISTANCE_METRIC: "COSINE",
     };
-    this.keyPrefix = _dbConfig.keyPrefix ?? `doc:${this.indexName}:`;
-    this.contentKey = _dbConfig.contentKey ?? "content";
-    this.metadataKey = _dbConfig.metadataKey ?? "metadata";
-    this.vectorKey = _dbConfig.vectorKey ?? "content_vector";
-    this.filter = _dbConfig.filter;
+    this.keyPrefix = args.keyPrefix ?? `doc:${this.indexName}:`;
+    this.contentKey = args.contentKey ?? "content";
+    this.metadataKey = args.metadataKey ?? "metadata";
+    this.vectorKey = args.vectorKey ?? "content_vector";
+    this.filter = args.filter;
   }
 
   async addDocuments(documents: Document[], options?: RedisAddOptions) {

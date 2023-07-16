@@ -2,7 +2,11 @@ import { Client, RequestParams, errors } from "@opensearch-project/opensearch";
 import * as uuid from "uuid";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 
 type OpenSearchEngine = "nmslib" | "hnsw";
 type OpenSearchSpaceType = "l2" | "cosinesimil" | "ip";
@@ -45,16 +49,29 @@ export class OpenSearchVectorStore extends VectorStore {
     return "opensearch";
   }
 
-  constructor(embeddings: Embeddings, args: OpenSearchClientArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<OpenSearchClientArgs>);
 
+  constructor(embeddings: Embeddings, args: OpenSearchClientArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<OpenSearchClientArgs>,
+    extrArgs?: OpenSearchClientArgs
+  ) {
+    const {
+      embeddings,
+      args: { client, ...args },
+    } = OpenSearchVectorStore.unrollFields<OpenSearchClientArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
     this.spaceType = args.vectorSearchOptions?.spaceType ?? "l2";
     this.engine = args.vectorSearchOptions?.engine ?? "nmslib";
     this.m = args.vectorSearchOptions?.m ?? 16;
     this.efConstruction = args.vectorSearchOptions?.efConstruction ?? 512;
     this.efSearch = args.vectorSearchOptions?.efSearch ?? 512;
 
-    this.client = args.client;
+    this.client = client;
     this.indexName = args.indexName ?? "documents";
   }
 

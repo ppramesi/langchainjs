@@ -2,7 +2,11 @@ import * as uuid from "uuid";
 import { Client, estypes } from "@elastic/elasticsearch";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 
 type ElasticKnnEngine = "hnsw";
 type ElasticSimilarity = "l2_norm" | "dot_product" | "cosine";
@@ -44,8 +48,22 @@ export class ElasticVectorSearch extends VectorStore {
     return "elastic_search";
   }
 
-  constructor(embeddings: Embeddings, args: ElasticClientArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<ElasticClientArgs>);
+
+  constructor(embeddings: Embeddings, args: ElasticClientArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<ElasticClientArgs>,
+    extrArgs?: ElasticClientArgs
+  ) {
+    const {
+      embeddings,
+      args: { client, ...args },
+    } = ElasticVectorSearch.unrollFields<ElasticClientArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
 
     this.engine = args.vectorSearchOptions?.engine ?? "hnsw";
     this.similarity = args.vectorSearchOptions?.similarity ?? "l2_norm";
@@ -53,7 +71,7 @@ export class ElasticVectorSearch extends VectorStore {
     this.efConstruction = args.vectorSearchOptions?.efConstruction ?? 100;
     this.candidates = args.vectorSearchOptions?.candidates ?? 200;
 
-    this.client = args.client;
+    this.client = client;
     this.indexName = args.indexName ?? "documents";
   }
 

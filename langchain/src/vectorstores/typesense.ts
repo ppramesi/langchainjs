@@ -6,7 +6,11 @@ import type {
 } from "typesense/lib/Typesense/Documents.js";
 import type { Document } from "../document.js";
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { AsyncCaller, AsyncCallerParams } from "../util/async_caller.js";
 
 interface VectorSearchResponseHit<T extends DocumentSchema>
@@ -92,8 +96,17 @@ export class Typesense extends VectorStore {
     return "typesense";
   }
 
-  constructor(embeddings: Embeddings, config: TypesenseConfig) {
-    super(embeddings, config);
+  constructor(fields: VectorStoreInput<TypesenseConfig>);
+
+  constructor(embeddings: Embeddings, args: TypesenseConfig);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<TypesenseConfig>,
+    extrArgs?: TypesenseConfig
+  ) {
+    const { embeddings, args: config } =
+      Typesense.unrollFields<TypesenseConfig>(fieldsOrEmbeddings, extrArgs);
+    super({ embeddings, ...config });
 
     // Assign config values to class properties.
     this.client = config.typesenseClient;

@@ -1,7 +1,11 @@
 import * as uuid from "uuid";
 import flatten from "flat";
 
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -40,12 +44,25 @@ export class PineconeStore extends VectorStore {
     return "pinecone";
   }
 
-  constructor(embeddings: Embeddings, args: PineconeLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<PineconeLibArgs>);
 
+  constructor(embeddings: Embeddings, args: PineconeLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<PineconeLibArgs>,
+    extrArgs?: PineconeLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { pineconeIndex, ...args },
+    } = PineconeStore.unrollFields<PineconeLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
     this.embeddings = embeddings;
     this.namespace = args.namespace;
-    this.pineconeIndex = args.pineconeIndex;
+    this.pineconeIndex = pineconeIndex;
     this.textKey = args.textKey ?? "text";
     this.filter = args.filter;
   }

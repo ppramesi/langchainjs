@@ -292,6 +292,10 @@ export interface SecretMap {
   MILVUS_PASSWORD?: string;
   MILVUS_SSL?: string;
   MILVUS_USERNAME?: string;
+  MYSCALE_HOST?: string;
+  MYSCALE_PASSWORD?: string;
+  MYSCALE_PORT?: string;
+  MYSCALE_USERNAME?: string;
   OPENAI_API_KEY?: string;
   PROMPTLAYER_API_KEY?: string;
   QDRANT_API_KEY?: string;
@@ -301,6 +305,15 @@ export interface SecretMap {
   REDIS_USERNAME?: string;
   REPLICATE_API_KEY?: string;
   SEARXNG_API_BASE?: string;
+  SINGLESTORE_DATABASE?: string;
+  SINGLESTORE_HOST?: string;
+  SINGLESTORE_PASSWORD?: string;
+  SINGLESTORE_PORT?: string;
+  SINGLESTORE_USERNAME?: string;
+  SUPABASE_VECTOR_STORE_PRIVATE_KEY?: string;
+  SUPABASE_VECTOR_STORE_URL?: string;
+  TYPEORM_PASSWORD?: string;
+  TYPEORM_USERNAME?: string;
   UPSTASH_REDIS_REST_TOKEN?: string;
   UPSTASH_REDIS_REST_URL?: string;
   VECTARA_API_KEY?: string;

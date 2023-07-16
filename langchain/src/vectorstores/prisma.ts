@@ -1,4 +1,8 @@
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 import { type Embeddings } from "../embeddings/base.js";
 import { Callbacks } from "../callbacks/manager.js";
@@ -92,6 +96,20 @@ type DefaultPrismaVectorStore = PrismaVectorStore<
   PrismaSqlFilter<Record<string, unknown>>
 >;
 
+export type PrismaArgs<
+  TModel extends Record<string, unknown>,
+  TModelName extends string,
+  TSelectModel extends ModelColumns<TModel>,
+  TFilterModel extends PrismaSqlFilter<TModel>
+> = {
+  db: PrismaClient;
+  prisma: PrismaNamespace;
+  tableName: TModelName;
+  vectorColumnName: string;
+  columns: TSelectModel;
+  filter?: TFilterModel;
+};
+
 export class PrismaVectorStore<
   TModel extends Record<string, unknown>,
   TModelName extends string,
@@ -123,22 +141,34 @@ export class PrismaVectorStore<
   }
 
   constructor(
+    fields: VectorStoreInput<
+      PrismaArgs<TModel, TModelName, TSelectModel, TFilterModel>
+    >
+  );
+
+  constructor(
     embeddings: Embeddings,
-    config: {
-      db: PrismaClient;
-      prisma: PrismaNamespace;
-      tableName: TModelName;
-      vectorColumnName: string;
-      columns: TSelectModel;
-      filter?: TFilterModel;
-    }
+    args: PrismaArgs<TModel, TModelName, TSelectModel, TFilterModel>
+  );
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<
+      PrismaArgs<TModel, TModelName, TSelectModel, TFilterModel>
+    >,
+    extrArgs?: PrismaArgs<TModel, TModelName, TSelectModel, TFilterModel>
   ) {
-    super(embeddings, {});
+    const {
+      embeddings,
+      args: { db, prisma, columns, ...config },
+    } = PrismaVectorStore.unrollFields<
+      PrismaArgs<TModel, TModelName, TSelectModel, TFilterModel>
+    >(fieldsOrEmbeddings, extrArgs);
+    super({ embeddings, ...config });
 
-    this.Prisma = config.prisma;
-    this.db = config.db;
+    this.Prisma = prisma;
+    this.db = db;
 
-    const entries = Object.entries(config.columns);
+    const entries = Object.entries(columns);
     const idColumn = entries.find((i) => i[1] === IdColumnSymbol)?.[0];
     const contentColumn = entries.find(
       (i) => i[1] === ContentColumnSymbol

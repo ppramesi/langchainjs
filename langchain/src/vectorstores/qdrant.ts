@@ -3,7 +3,11 @@ import type { Schemas as QdrantSchemas } from "@qdrant/js-client-rest";
 import { v4 as uuid } from "uuid";
 
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 import { getEnvironmentVariable } from "../util/env.js";
 
@@ -23,6 +27,8 @@ type QdrantSearchResponse = QdrantSchemas["ScoredPoint"] & {
 };
 
 export class QdrantVectorStore extends VectorStore {
+  lc_serializable = true;
+
   get lc_secrets(): { [key: string]: string } {
     return {
       apiKey: "QDRANT_API_KEY",
@@ -40,18 +46,36 @@ export class QdrantVectorStore extends VectorStore {
     return "qdrant";
   }
 
-  constructor(embeddings: Embeddings, args: QdrantLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<QdrantLibArgs>);
+
+  constructor(embeddings: Embeddings, args: QdrantLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<QdrantLibArgs>,
+    extrArgs?: QdrantLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { client, ...args },
+    } = QdrantVectorStore.unrollFields<QdrantLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+
+    if (client) {
+      this.lc_serializable = false;
+    }
 
     const url = args.url ?? getEnvironmentVariable("QDRANT_URL");
     const apiKey = args.apiKey ?? getEnvironmentVariable("QDRANT_API_KEY");
 
-    if (!args.client && !url) {
+    if (!client && !url) {
       throw new Error("Qdrant client or url address must be set.");
     }
 
     this.client =
-      args.client ||
+      client ||
       new QdrantClient({
         url,
         apiKey,

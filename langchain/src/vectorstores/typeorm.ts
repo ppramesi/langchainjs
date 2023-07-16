@@ -1,6 +1,10 @@
 import { Metadata } from "@opensearch-project/opensearch/api/types.js";
 import { DataSource, DataSourceOptions, EntitySchema } from "typeorm";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 import { getEnvironmentVariable } from "../util/env.js";
@@ -21,6 +25,15 @@ export class TypeORMVectorStoreDocument extends Document {
 const defaultDocumentTableName = "documents";
 
 export class TypeORMVectorStore extends VectorStore {
+  lc_serializable = true;
+
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      "postgresConnectionOptions.username": "TYPEORM_USERNAME",
+      "postgresConnectionOptions.password": "TYPEORM_PASSWORD",
+    };
+  }
+
   declare FilterType: Metadata;
 
   tableName: string;
@@ -37,8 +50,20 @@ export class TypeORMVectorStore extends VectorStore {
     return "typeorm";
   }
 
-  private constructor(embeddings: Embeddings, fields: TypeORMVectorStoreArgs) {
-    super(embeddings, fields);
+  constructor(fields: VectorStoreInput<TypeORMVectorStoreArgs>);
+
+  constructor(embeddings: Embeddings, args: TypeORMVectorStoreArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<TypeORMVectorStoreArgs>,
+    extrArgs?: TypeORMVectorStoreArgs
+  ) {
+    const { embeddings, args: fields } =
+      TypeORMVectorStore.unrollFields<TypeORMVectorStoreArgs>(
+        fieldsOrEmbeddings,
+        extrArgs
+      );
+    super({ embeddings, ...fields });
     this.tableName = fields.tableName || defaultDocumentTableName;
     this.filter = fields.filter;
 

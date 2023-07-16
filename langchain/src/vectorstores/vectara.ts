@@ -30,6 +30,8 @@ export interface VectaraFilter {
 }
 
 export class VectaraStore extends VectorStore {
+  lc_serializable = true;
+
   get lc_secrets(): { [key: string]: string } {
     return {
       apiKey: "VECTARA_API_KEY",
@@ -65,7 +67,8 @@ export class VectaraStore extends VectorStore {
   constructor(args: VectaraLibArgs) {
     // Vectara doesn't need embeddings, but we need to pass something to the parent constructor
     // The embeddings are abstracted out from the user in Vectara.
-    super(new FakeEmbeddings(), args);
+    const embeddings = new FakeEmbeddings();
+    super({ embeddings, ...args });
 
     const apiKey = args.apiKey ?? getEnvironmentVariable("VECTARA_API_KEY");
     if (!apiKey) {

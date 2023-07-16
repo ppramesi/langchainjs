@@ -1,5 +1,9 @@
 import type { Collection, Document as MongoDBDocument } from "mongodb";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
@@ -25,9 +29,23 @@ export class MongoDBAtlasVectorSearch extends VectorStore {
     return "mongodb_atlas";
   }
 
-  constructor(embeddings: Embeddings, args: MongoDBAtlasVectorSearchLibArgs) {
-    super(embeddings, args);
-    this.collection = args.collection;
+  constructor(fields: VectorStoreInput<MongoDBAtlasVectorSearchLibArgs>);
+
+  constructor(embeddings: Embeddings, args: MongoDBAtlasVectorSearchLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<MongoDBAtlasVectorSearchLibArgs>,
+    extrArgs?: MongoDBAtlasVectorSearchLibArgs
+  ) {
+    const {
+      embeddings,
+      args: { collection, ...args },
+    } = MongoDBAtlasVectorSearch.unrollFields<MongoDBAtlasVectorSearchLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+    this.collection = collection;
     this.indexName = args.indexName || "default";
     this.textKey = args.textKey || "text";
     this.embeddingKey = args.embeddingKey || "embedding";

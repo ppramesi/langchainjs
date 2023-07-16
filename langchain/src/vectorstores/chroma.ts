@@ -3,7 +3,11 @@ import type { ChromaClient as ChromaClientT, Collection } from "chromadb";
 import type { Where } from "chromadb/dist/main/types.js";
 
 import { Embeddings } from "../embeddings/base.js";
-import { VectorStore } from "./base.js";
+import {
+  BaseVectorStoreFields,
+  VectorStore,
+  VectorStoreInput,
+} from "./base.js";
 import { Document } from "../document.js";
 
 export type ChromaLibArgs =
@@ -44,15 +48,29 @@ export class Chroma extends VectorStore {
     return "chroma";
   }
 
-  constructor(embeddings: Embeddings, args: ChromaLibArgs) {
-    super(embeddings, args);
+  constructor(fields: VectorStoreInput<ChromaLibArgs>);
+
+  constructor(embeddings: Embeddings, args: ChromaLibArgs);
+
+  constructor(
+    fieldsOrEmbeddings: BaseVectorStoreFields<ChromaLibArgs>,
+    extrArgs?: ChromaLibArgs
+  ) {
+    const { embeddings, args } = Chroma.unrollFields<ChromaLibArgs>(
+      fieldsOrEmbeddings,
+      extrArgs
+    );
+    super({ embeddings, ...args });
+
     this.numDimensions = args.numDimensions;
     this.embeddings = embeddings;
     this.collectionName = ensureCollectionName(args.collectionName);
     if ("index" in args) {
       this.index = args.index;
+      this.lc_serializable = false;
     } else if ("url" in args) {
       this.url = args.url || "http://localhost:8000";
+      this.lc_serializable = true;
     }
 
     this.filter = args.filter;
