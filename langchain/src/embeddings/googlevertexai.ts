@@ -45,6 +45,14 @@ export class GoogleVertexAIEmbeddings
   extends Embeddings
   implements GoogleVertexAIEmbeddingsParams
 {
+  lc_serializable = false;
+
+  get lc_aliases(): Record<string, string> {
+    return {
+      model: "model_name",
+    };
+  }
+
   model = "textembedding-gecko";
 
   private connection: GoogleVertexAIConnection<
@@ -52,6 +60,10 @@ export class GoogleVertexAIEmbeddings
     GoogleVertexAILLMEmbeddingsInstance,
     GoogleVertexEmbeddingsResults
   >;
+
+  _embeddingsType(): string {
+    return "googlevertexai";
+  }
 
   constructor(fields?: GoogleVertexAIEmbeddingsParams) {
     super(fields ?? {});
@@ -64,7 +76,7 @@ export class GoogleVertexAIEmbeddings
     );
   }
 
-  async embedDocuments(documents: string[]): Promise<number[][]> {
+  async _embedDocuments(documents: string[]): Promise<number[][]> {
     const instanceChunks: GoogleVertexAILLMEmbeddingsInstance[][] = chunkArray(
       documents.map((document) => ({
         content: document,
@@ -90,8 +102,8 @@ export class GoogleVertexAIEmbeddings
     return result;
   }
 
-  async embedQuery(document: string): Promise<number[]> {
-    const data = await this.embedDocuments([document]);
+  async _embedQuery(document: string): Promise<number[]> {
+    const data = await this._embedDocuments([document]);
     return data[0];
   }
 }

@@ -22,6 +22,7 @@ export interface BaseCallbackHandlerInput {
   ignoreChain?: boolean;
   ignoreAgent?: boolean;
   ignoreRetriever?: boolean;
+  ignoreEmbeddings?: boolean;
 }
 
 export interface NewTokenIndices {
@@ -199,6 +200,30 @@ abstract class BaseCallbackHandlerMethodsClass {
     metadata?: Record<string, unknown>
   ): Promise<void> | void;
 
+  /**
+   * Called when embedding throws an error, after call to embedding.
+   * with the error and the run ID
+   */
+  handleEmbeddingError?(
+    err: Error,
+    runId: string,
+    parentRunId?: string
+  ): Promise<void> | void;
+
+  /**
+   * Called when embedding is started, before call to embedding.
+   * with the input text and the run ID
+   */
+  handleEmbeddingStart?(
+    embedding: Serialized,
+    texts: string[],
+    runId: string,
+    parentRunId?: string,
+    extraParams?: Record<string, unknown>,
+    tags?: string[],
+    metadata?: Record<string, unknown>
+  ): Promise<void> | void;
+
   handleRetrieverEnd?(
     documents: Document[],
     runId: string,
@@ -211,6 +236,16 @@ abstract class BaseCallbackHandlerMethodsClass {
     runId: string,
     parentRunId?: string,
     tags?: string[]
+  ): Promise<void> | void;
+
+  /**
+   * Called after embedding is completed, before it exits.
+   * with embeddings vector and the run ID
+   */
+  handleEmbeddingEnd?(
+    vector: number[],
+    runId: string,
+    parentRunId?: string
   ): Promise<void> | void;
 }
 
@@ -259,6 +294,8 @@ export abstract class BaseCallbackHandler
 
   ignoreRetriever = false;
 
+  ignoreEmbeddings = false;
+
   awaitHandlers =
     typeof process !== "undefined"
       ? // eslint-disable-next-line no-process-env
@@ -273,6 +310,7 @@ export abstract class BaseCallbackHandler
       this.ignoreChain = input.ignoreChain ?? this.ignoreChain;
       this.ignoreAgent = input.ignoreAgent ?? this.ignoreAgent;
       this.ignoreRetriever = input.ignoreRetriever ?? this.ignoreRetriever;
+      this.ignoreEmbeddings = input.ignoreEmbeddings ?? this.ignoreEmbeddings;
     }
   }
 

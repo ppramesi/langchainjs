@@ -14,7 +14,7 @@ import {
   NewTokenIndices,
 } from "../base.js";
 
-export type RunType = "llm" | "chain" | "tool";
+export type RunType = "llm" | "chain" | "tool" | "embedding";
 
 export interface Run extends BaseRun {
   // some optional fields are always present here
@@ -340,6 +340,75 @@ export abstract class BaseTracer extends BaseCallbackHandler {
     await this.onAgentAction?.(run as AgentRun);
   }
 
+  async handleEmbeddingStart(
+    embedding: Serialized,
+    texts: string[],
+    runId: string,
+    parentRunId?: string,
+    extraParams?: Record<string, unknown>,
+    tags?: string[],
+    metadata?: KVMap
+  ) {
+    const execution_order = this._getExecutionOrder(parentRunId);
+    const start_time = Date.now();
+    const finalExtraParams = metadata
+      ? { ...extraParams, metadata }
+      : extraParams;
+    const run: Run = {
+      id: runId,
+      name: embedding.id[embedding.id.length - 1],
+      parent_run_id: parentRunId,
+      start_time,
+      serialized: embedding,
+      events: [
+        {
+          name: "start",
+          time: start_time,
+        },
+      ],
+      inputs: { texts },
+      execution_order,
+      child_execution_order: execution_order,
+      run_type: "embedding",
+      child_runs: [],
+      extra: finalExtraParams ?? {},
+      tags: tags || [],
+    };
+
+    this._startTrace(run);
+    await this.onEmbeddingStart?.(run);
+  }
+
+  async handleEmbeddingEnd(vector: number[], runId: string) {
+    const run = this.runMap.get(runId);
+    if (!run || run?.run_type !== "embedding") {
+      throw new Error("No Embedding run to end.");
+    }
+    run.end_time = Date.now();
+    run.outputs = { vector };
+    run.events.push({
+      name: "end",
+      time: run.end_time,
+    });
+    await this.onEmbeddingEnd?.(run);
+    await this._endTrace(run);
+  }
+
+  async handleEmbeddingError(error: Error, runId: string) {
+    const run = this.runMap.get(runId);
+    if (!run || run?.run_type !== "embedding") {
+      throw new Error("No Embedding run to end.");
+    }
+    run.end_time = Date.now();
+    run.error = error.message;
+    run.events.push({
+      name: "error",
+      time: run.end_time,
+    });
+    await this.onEmbeddingError?.(run);
+    await this._endTrace(run);
+  }
+
   async handleAgentEnd(action: AgentFinish, runId: string): Promise<void> {
     const run = this.runMap.get(runId);
     if (!run || run?.run_type !== "chain") {
@@ -404,6 +473,12 @@ export abstract class BaseTracer extends BaseCallbackHandler {
   onToolError?(run: Run): void | Promise<void>;
 
   onAgentAction?(run: Run): void | Promise<void>;
+
+  onEmbeddingStart?(run: Run): void | Promise<void>;
+
+  onEmbeddingEnd?(run: Run): void | Promise<void>;
+
+  onEmbeddingError?(run: Run): void | Promise<void>;
 
   onAgentEnd?(run: Run): void | Promise<void>;
 

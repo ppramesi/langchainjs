@@ -11,11 +11,30 @@ export class HuggingFaceInferenceEmbeddings
   extends Embeddings
   implements HuggingFaceInferenceEmbeddingsParams
 {
+  lc_serializable = true;
+
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      apiKey: "HUGGINGFACEHUB_API_KEY",
+    };
+  }
+
+  get lc_aliases(): Record<string, string> {
+    return {
+      model: "model_name",
+      apiKey: "huggingfacehub_api_token",
+    };
+  }
+
   apiKey?: string;
 
   model: string;
 
   client: HfInference;
+
+  _embeddingsType(): string {
+    return "hf";
+  }
 
   constructor(fields?: HuggingFaceInferenceEmbeddingsParams) {
     super(fields ?? {});
@@ -38,11 +57,11 @@ export class HuggingFaceInferenceEmbeddings
     ) as Promise<number[][]>;
   }
 
-  embedQuery(document: string): Promise<number[]> {
+  _embedQuery(document: string): Promise<number[]> {
     return this._embed([document]).then((embeddings) => embeddings[0]);
   }
 
-  embedDocuments(documents: string[]): Promise<number[][]> {
+  _embedDocuments(documents: string[]): Promise<number[][]> {
     return this._embed(documents);
   }
 }

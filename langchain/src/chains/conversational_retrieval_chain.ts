@@ -2,11 +2,11 @@ import { PromptTemplate } from "../prompts/prompt.js";
 import { BaseLanguageModel } from "../base_language/index.js";
 import { SerializedChatVectorDBQAChain } from "./serde.js";
 import { ChainValues, BaseMessage } from "../schema/index.js";
-import { BaseRetriever } from "../schema/retriever.js";
 import { BaseChain, ChainInputs } from "./base.js";
 import { LLMChain } from "./llm_chain.js";
 import { QAChainParams, loadQAChain } from "./question_answering/load.js";
 import { CallbackManagerForChainRun } from "../callbacks/manager.js";
+import { BaseRetriever } from "../schema/retriever.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type LoadValues = Record<string, any>;
@@ -115,7 +115,7 @@ export class ConversationalRetrievalQAChain
     }
     const docs = await this.retriever.getRelevantDocuments(
       newQuestion,
-      runManager?.getChild("retriever")
+      runManager?.getChild("retrieve_documents")
     );
     const inputs = {
       question: newQuestion,

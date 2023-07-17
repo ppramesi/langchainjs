@@ -61,7 +61,7 @@ export class VectorDBQAChain extends BaseChain implements VectorDBQAChainInput {
       question,
       this.k,
       values.filter,
-      runManager?.getChild("vectorstore")
+      runManager?.getChild("retrieve_documents")
     );
     const inputs = { question, input_documents: docs };
     const result = await this.combineDocumentsChain.call(

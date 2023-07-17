@@ -302,11 +302,13 @@ export interface SecretMap {
   MILVUS_PASSWORD?: string;
   MILVUS_SSL?: string;
   MILVUS_USERNAME?: string;
+  MONGODB_ATLAS_URI?: string;
   MYSCALE_HOST?: string;
   MYSCALE_PASSWORD?: string;
   MYSCALE_PORT?: string;
   MYSCALE_USERNAME?: string;
   OPENAI_API_KEY?: string;
+  PINECONE_API_KEY?: string;
   PROMPTLAYER_API_KEY?: string;
   QDRANT_API_KEY?: string;
   QDRANT_URL?: string;

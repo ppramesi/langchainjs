@@ -240,7 +240,7 @@ export class WebBrowser extends Tool {
         task,
         4,
         undefined,
-        runManager?.getChild("vectorstore")
+        runManager?.getChild("retrieve_documents")
       );
       context = results.map((res) => res.pageContent).join("\n");
     }

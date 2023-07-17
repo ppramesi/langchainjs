@@ -79,14 +79,14 @@ export class SelfQueryRetriever
         query,
         this.searchParams?.k,
         nextArg.filter,
-        runManager?.getChild("vectorstore")
+        runManager?.getChild("retrieve_documents")
       );
     } else {
       return this.vectorStore.similaritySearch(
         query,
         this.searchParams?.k,
         this.searchParams?.filter,
-        runManager?.getChild("vectorstore")
+        runManager?.getChild("retrieve_documents")
       );
     }
   }

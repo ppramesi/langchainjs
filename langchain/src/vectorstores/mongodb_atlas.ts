@@ -1,4 +1,8 @@
-import type { Collection, Document as MongoDBDocument } from "mongodb";
+import type {
+  Collection,
+  MongoClientOptions,
+  Document as MongoDBDocument,
+} from "mongodb";
 import {
   BaseVectorStoreFields,
   VectorStore,
@@ -7,17 +11,40 @@ import {
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 
-export type MongoDBAtlasVectorSearchLibArgs = {
-  collection: Collection<MongoDBDocument>;
+export type MongoDBAtlasVectorSearchLibArgs = (
+  | {
+      collection: Collection<MongoDBDocument>;
+    }
+  | {
+      uri: string;
+      dbName: string;
+      collectionName: string;
+      mongoOptions?: MongoClientOptions;
+    }
+) & {
   indexName?: string;
   textKey?: string;
   embeddingKey?: string;
 };
 
 export class MongoDBAtlasVectorSearch extends VectorStore {
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      uri: "MONGODB_ATLAS_URI",
+    };
+  }
+
   declare FilterType: MongoDBDocument;
 
-  collection: Collection<MongoDBDocument>;
+  collection?: Collection<MongoDBDocument>;
+
+  uri?: string;
+
+  mongoOptions?: MongoClientOptions;
+
+  dbName?: string;
+
+  collectionName?: string;
 
   indexName: string;
 
@@ -39,16 +66,43 @@ export class MongoDBAtlasVectorSearch extends VectorStore {
   ) {
     const {
       embeddings,
-      args: { collection, ...args },
+      args: { ...args },
     } = MongoDBAtlasVectorSearch.unrollFields<MongoDBAtlasVectorSearchLibArgs>(
       fieldsOrEmbeddings,
       extrArgs
     );
     super({ embeddings, ...args });
-    this.collection = collection;
+    if ("collection" in args) {
+      this.collection = args.collection;
+      this.lc_serializable = false;
+    } else if ("uri" in args && "dbName" in args && "collectionName" in args) {
+      this.uri = args.uri;
+      this.mongoOptions = args.mongoOptions;
+      this.dbName = args.dbName;
+      this.collectionName = args.collectionName;
+      this.lc_serializable = true;
+    } else {
+      throw new Error(
+        "MongoDBAtlasVectorSearch requires either MongoDB Collection instance or uri, db name and collection name."
+      );
+    }
     this.indexName = args.indexName || "default";
     this.textKey = args.textKey || "text";
     this.embeddingKey = args.embeddingKey || "embedding";
+  }
+
+  async ensureCollection() {
+    if (!this.collection) {
+      if (this.uri && this.collectionName && this.dbName) {
+        const { MongoClient } =
+          await MongoDBAtlasVectorSearch.importCreateCollection();
+        const client = new MongoClient(this.uri, this.mongoOptions);
+        return client.db(this.dbName).collection(this.collectionName);
+      } else {
+        throw new Error("Cannot find url or private key");
+      }
+    }
+    return this.collection;
   }
 
   async addVectors(vectors: number[][], documents: Document[]): Promise<void> {
@@ -57,7 +111,7 @@ export class MongoDBAtlasVectorSearch extends VectorStore {
       [this.embeddingKey]: embedding,
       ...documents[idx].metadata,
     }));
-    await this.collection.insertMany(docs);
+    await (await this.ensureCollection()).insertMany(docs);
   }
 
   async addDocuments(documents: Document[]): Promise<void> {
@@ -99,7 +153,7 @@ export class MongoDBAtlasVectorSearch extends VectorStore {
     if (postFilterPipeline) {
       pipeline.push(...postFilterPipeline);
     }
-    const results = this.collection.aggregate(pipeline);
+    const results = (await this.ensureCollection()).aggregate(pipeline);
 
     const ret: [Document, number][] = [];
     for await (const result of results) {
@@ -153,5 +207,16 @@ export class MongoDBAtlasVectorSearch extends VectorStore {
     const instance = new this(embeddings, dbConfig);
     await instance.addDocuments(docs);
     return instance;
+  }
+
+  static async importCreateCollection() {
+    try {
+      const { MongoClient } = await import("mongodb");
+      return { MongoClient };
+    } catch (error) {
+      throw new Error(
+        "Please install Supabase as a dependency with, e.g. `npm install -S Supabase`"
+      );
+    }
   }
 }

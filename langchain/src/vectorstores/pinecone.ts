@@ -16,12 +16,20 @@ type VectorOperationsApi = ReturnType<
   import("@pinecone-database/pinecone").PineconeClient["Index"]
 >;
 
-export interface PineconeLibArgs {
-  pineconeIndex: VectorOperationsApi;
+export type PineconeLibArgs = (
+  | {
+      pineconeIndex: VectorOperationsApi;
+    }
+  | {
+      environment: string;
+      apiKey: string;
+      indexName?: string;
+    }
+) & {
   textKey?: string;
   namespace?: string;
   filter?: PineconeMetadata;
-}
+};
 
 export type PineconeDeleteParams = {
   ids?: string[];
@@ -30,15 +38,27 @@ export type PineconeDeleteParams = {
 };
 
 export class PineconeStore extends VectorStore {
+  get lc_secrets(): { [key: string]: string } | undefined {
+    return {
+      apiKey: "PINECONE_API_KEY",
+    };
+  }
+
   declare FilterType: PineconeMetadata;
 
   textKey: string;
 
   namespace?: string;
 
-  pineconeIndex: VectorOperationsApi;
+  pineconeIndex?: VectorOperationsApi;
+
+  environment?: string;
+
+  apiKey?: string;
 
   filter?: PineconeMetadata;
+
+  indexName?: string;
 
   vectorstoreType(): string {
     return "pinecone";
@@ -54,7 +74,7 @@ export class PineconeStore extends VectorStore {
   ) {
     const {
       embeddings,
-      args: { pineconeIndex, ...args },
+      args: { ...args },
     } = PineconeStore.unrollFields<PineconeLibArgs>(
       fieldsOrEmbeddings,
       extrArgs
@@ -62,9 +82,38 @@ export class PineconeStore extends VectorStore {
     super({ embeddings, ...args });
     this.embeddings = embeddings;
     this.namespace = args.namespace;
-    this.pineconeIndex = pineconeIndex;
+    if ("pineconeIndex" in args) {
+      this.pineconeIndex = args.pineconeIndex;
+      this.lc_serializable = false;
+    } else if (
+      "apiKey" in args &&
+      "environment" in args &&
+      "indexName" in args
+    ) {
+      this.apiKey = args.apiKey;
+      this.environment = args.environment;
+      this.indexName = args.indexName;
+      this.lc_serializable = true;
+    } else {
+      throw new Error(
+        "MongoDBAtlasVectorSearch requires either MongoDB Collection instance or uri, db name and collection name."
+      );
+    }
     this.textKey = args.textKey ?? "text";
     this.filter = args.filter;
+  }
+
+  async ensureIndex() {
+    if (!this.pineconeIndex) {
+      if (this.apiKey && this.environment && this.indexName) {
+        const { PineconeClient } = await PineconeStore.importPineconeClient();
+        const client = new PineconeClient();
+        return client.Index(this.indexName);
+      } else {
+        throw new Error("Cannot find api key or environment");
+      }
+    }
+    return this.pineconeIndex;
   }
 
   async addDocuments(
@@ -131,7 +180,9 @@ export class PineconeStore extends VectorStore {
     const chunkSize = 50;
     for (let i = 0; i < pineconeVectors.length; i += chunkSize) {
       const chunk = pineconeVectors.slice(i, i + chunkSize);
-      await this.pineconeIndex.upsert({
+      await (
+        await this.ensureIndex()
+      ).upsert({
         upsertRequest: {
           vectors: chunk,
           namespace: this.namespace,
@@ -144,7 +195,9 @@ export class PineconeStore extends VectorStore {
   async delete(params: PineconeDeleteParams): Promise<void> {
     const { namespace = this.namespace, deleteAll, ids, ...rest } = params;
     if (deleteAll) {
-      await this.pineconeIndex.delete1({
+      await (
+        await this.ensureIndex()
+      ).delete1({
         deleteAll: true,
         namespace,
         ...rest,
@@ -153,7 +206,9 @@ export class PineconeStore extends VectorStore {
       const batchSize = 1000;
       for (let i = 0; i < ids.length; i += batchSize) {
         const batchIds = ids.slice(i, i + batchSize);
-        await this.pineconeIndex.delete1({
+        await (
+          await this.ensureIndex()
+        ).delete1({
           ids: batchIds,
           namespace,
           ...rest,
@@ -173,7 +228,9 @@ export class PineconeStore extends VectorStore {
       throw new Error("cannot provide both `filter` and `this.filter`");
     }
     const _filter = filter ?? this.filter;
-    const results = await this.pineconeIndex.query({
+    const results = await (
+      await this.ensureIndex()
+    ).query({
       queryRequest: {
         includeMetadata: true,
         namespace: this.namespace,
@@ -222,15 +279,19 @@ export class PineconeStore extends VectorStore {
       });
       docs.push(newDoc);
     }
-
-    const args: PineconeLibArgs = {
-      pineconeIndex:
-        "pineconeIndex" in dbConfig
-          ? dbConfig.pineconeIndex
-          : dbConfig.pineconeClient,
-      textKey: dbConfig.textKey,
-      namespace: dbConfig.namespace,
-    };
+    let args: PineconeLibArgs;
+    if ("pineconeIndex" in dbConfig || "pineconeClient" in dbConfig) {
+      args = {
+        pineconeIndex:
+          "pineconeIndex" in dbConfig
+            ? dbConfig.pineconeIndex
+            : dbConfig.pineconeClient,
+        textKey: dbConfig.textKey,
+        namespace: dbConfig.namespace,
+      };
+    } else {
+      args = dbConfig;
+    }
     return PineconeStore.fromDocuments(docs, embeddings, args);
   }
 
@@ -253,5 +314,16 @@ export class PineconeStore extends VectorStore {
   ): Promise<PineconeStore> {
     const instance = new this(embeddings, dbConfig);
     return instance;
+  }
+
+  static async importPineconeClient() {
+    try {
+      const { PineconeClient } = await import("@pinecone-database/pinecone");
+      return { PineconeClient };
+    } catch (error) {
+      throw new Error(
+        "Please install pinecone database as a dependency with, e.g. `npm install -S @pinecone-database/pinecone`"
+      );
+    }
   }
 }

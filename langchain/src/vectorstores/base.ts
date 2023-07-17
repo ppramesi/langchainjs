@@ -23,7 +23,7 @@ export class VectorStoreRetriever<
   lc_serializable = true;
 
   get lc_namespace() {
-    return ["langchain", "retrievers", this._vectorstoreType()];
+    return ["langchain", "vectorstores", "base"];
   }
 
   vectorStore: V;
@@ -51,7 +51,7 @@ export class VectorStoreRetriever<
       query,
       this.k,
       this.filter,
-      runManager?.getChild("vectorstore")
+      runManager?.getChild("retrieve_documents")
     );
   }
 
@@ -74,7 +74,7 @@ export type BaseVectorStoreFields<T extends { [k: string]: any }> =
 export abstract class VectorStore extends Serializable {
   declare FilterType: object;
 
-  lc_namespace = ["langchain", "vector_stores", this.vectorstoreType()];
+  lc_namespace = ["langchain", "vectorstores", this.vectorstoreType()];
 
   embeddings: Embeddings;
 
@@ -121,10 +121,10 @@ export abstract class VectorStore extends Serializable {
     query: string,
     k = 4,
     filter: this["FilterType"] | undefined = undefined,
-    _callbacks: Callbacks | undefined = undefined // implement passing to embedQuery later
+    callbacks: Callbacks | undefined = undefined
   ): Promise<Document[]> {
     const results = await this.similaritySearchVectorWithScore(
-      await this.embeddings.embedQuery(query),
+      await this.embeddings.embedQuery(query, callbacks),
       k,
       filter
     );
@@ -136,10 +136,10 @@ export abstract class VectorStore extends Serializable {
     query: string,
     k = 4,
     filter: this["FilterType"] | undefined = undefined,
-    _callbacks: Callbacks | undefined = undefined // implement passing to embedQuery later
+    callbacks: Callbacks | undefined = undefined
   ): Promise<[Document, number][]> {
     return this.similaritySearchVectorWithScore(
-      await this.embeddings.embedQuery(query),
+      await this.embeddings.embedQuery(query, callbacks),
       k,
       filter
     );

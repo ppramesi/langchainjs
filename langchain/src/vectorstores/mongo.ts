@@ -33,7 +33,7 @@ export class MongoVectorStore extends VectorStore {
   indexName: string;
 
   vectorstoreType(): string {
-    return "mongodb";
+    return "mongo";
   }
 
   constructor(fields: VectorStoreInput<MongoLibArgs>);

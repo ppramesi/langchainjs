@@ -111,17 +111,6 @@ export class SupabaseVectorStore extends VectorStore {
     return this.client;
   }
 
-  static async importCreateClient() {
-    try {
-      const { createClient } = await import("@supabase/supabase-js");
-      return { createClient };
-    } catch (error) {
-      throw new Error(
-        "Please install Supabase as a dependency with, e.g. `npm install -S Supabase`"
-      );
-    }
-  }
-
   async addDocuments(documents: Document[], options?: { ids?: string[] }) {
     const texts = documents.map(({ pageContent }) => pageContent);
     return this.addVectors(
@@ -265,5 +254,16 @@ export class SupabaseVectorStore extends VectorStore {
   ): Promise<SupabaseVectorStore> {
     const instance = new this(embeddings, dbConfig);
     return instance;
+  }
+
+  static async importCreateClient() {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      return { createClient };
+    } catch (error) {
+      throw new Error(
+        "Please install Supabase as a dependency with, e.g. `npm install -S Supabase`"
+      );
+    }
   }
 }

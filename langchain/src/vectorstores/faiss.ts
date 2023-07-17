@@ -17,8 +17,6 @@ export interface FaissLibArgs {
 }
 
 export class FaissStore extends SaveableVectorStore {
-  lc_serializable = true;
-
   _index?: IndexFlatL2;
 
   _mapping: Record<number, string>;

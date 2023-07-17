@@ -30,12 +30,7 @@ export class HydeRetriever<
   V extends VectorStore = VectorStore
 > extends VectorStoreRetriever<V> {
   get lc_namespace(): string[] {
-    return [
-      "langchain",
-      "retrievers",
-      "hyde",
-      this.vectorStore.vectorstoreType(),
-    ];
+    return ["langchain", "retrievers", "hyde"];
   }
 
   llm: BaseLanguageModel;
@@ -79,7 +74,7 @@ export class HydeRetriever<
       answer,
       this.k,
       this.filter,
-      runManager?.getChild("vectorstore")
+      runManager?.getChild("retrieve_documents")
     );
 
     return results;

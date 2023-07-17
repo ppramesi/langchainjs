@@ -22,8 +22,6 @@ export interface HNSWLibArgs extends HNSWLibBase {
 }
 
 export class HNSWLib extends SaveableVectorStore {
-  lc_serializable = true;
-
   declare FilterType: (doc: Document) => boolean;
 
   _index?: HierarchicalNSWT;
