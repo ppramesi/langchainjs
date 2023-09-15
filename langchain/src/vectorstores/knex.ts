@@ -7,21 +7,44 @@ import { isFloat, isInt, isString } from "../util/types.js";
 
 export type FilterValue = string | number;
 
+export type TextSearchValue = {
+  query: string;
+  type?: "plain" | "phrase" | "websearch";
+  config?: string;
+};
+
 export type ComparisonOperator =
   | { $eq: FilterValue }
   | { $gt: FilterValue }
   | { $gte: FilterValue }
   | { $lt: FilterValue }
   | { $lte: FilterValue }
-  | { $not: FilterValue };
+  | { $not: FilterValue }
+  | { $textSearch: TextSearchValue };
 
 export type LogicalOperator = { $and: KnexFilter[] } | { $or: KnexFilter[] };
 
+export type ExcludeKeyValueFilter = "$filter" | "$join";
+
 export type KeyValueFilter = {
   [key: string]: FilterValue | ComparisonOperator;
+} & {
+  [key in ExcludeKeyValueFilter]?: never;
 };
 
 export type KnexFilter = KeyValueFilter | LogicalOperator;
+
+export type KnexFilterWithJoin =
+  | {
+      metadataFilter?: never;
+      columnFilter?: KnexFilter;
+      join?: string;
+    }
+  | {
+      metadataFilter?: KnexFilter;
+      columnFilter?: never;
+      join?: string;
+    };
 
 export type Metric = "cosine" | "l2" | "manhattan" | "inner_product";
 
@@ -44,12 +67,15 @@ const ComparisonMap = {
   $gt: ">",
   $gte: ">=",
   $not: "<>",
-};
+  $textSearch: "@@",
+} as const;
+type ComparisonMapKey = keyof typeof ComparisonMap;
 
 const LogicalMap = {
   $and: "AND",
   $or: "OR",
-};
+} as const;
+type LogicalMapKey = keyof typeof LogicalMap;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ColumnValue = { [K: string]: any };
@@ -124,7 +150,7 @@ export abstract class PostgresEmbeddingExtension {
    * Build the SQL statement to ensure the extension is installed in the
    * database.
    */
-  abstract buildEnsureTableStatement(): string;
+  abstract buildEnsureExtensionStatement(): string;
 
   /**
    * Build the SQL statement to get the data type of the embedding column
@@ -145,6 +171,7 @@ export abstract class PostgresEmbeddingExtension {
    */
   abstract buildHNSWIndexStatement(
     tableName: string,
+    columnName: string,
     indexOpts: { m?: number; efConstruction?: number; efSearch?: number }
   ): string;
 }
@@ -173,7 +200,7 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
     return `SELECT ${selectStatement}, embedding ${arrow} array? AS "_distance" FROM ${tableName}`;
   }
 
-  buildEnsureTableStatement(): string {
+  buildEnsureExtensionStatement(): string {
     return "CREATE EXTENSION IF NOT EXISTS embedding;";
   }
 
@@ -187,6 +214,7 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
 
   buildHNSWIndexStatement(
     tableName: string,
+    columnName: string,
     {
       m = 16,
       efConstruction = 64,
@@ -212,7 +240,7 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
       default:
         throw new Error("Invalid metric");
     }
-    return `CREATE INDEX ON ${tableName} USING hnsw(embedding${ops}) WITH (${opts.join(
+    return `CREATE INDEX ON ${tableName} USING hnsw(${columnName}${ops}) WITH (${opts.join(
       ", "
     )});`;
   }
@@ -242,7 +270,7 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
     return `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM ${tableName}`;
   }
 
-  buildEnsureTableStatement(): string {
+  buildEnsureExtensionStatement(): string {
     return "CREATE EXTENSION IF NOT EXISTS vector;";
   }
 
@@ -256,6 +284,7 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
 
   buildHNSWIndexStatement(
     tableName: string,
+    columnName: string,
     {
       m = 16,
       efConstruction = 64,
@@ -284,7 +313,7 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
       default:
         throw new Error("Invalid metric");
     }
-    return `CREATE INDEX ON ${tableName} USING hnsw(embedding${ops})${
+    return `CREATE INDEX ON ${tableName} USING hnsw(${columnName}${ops})${
       opts.length > 0 ? ` WITH (${opts.join(", ")})` : ""
     };${efSearchStr}`;
   }
@@ -313,16 +342,19 @@ export type Column = {
 export interface KnexVectorStoreArgs {
   knex: KnexT;
   tableName?: string;
+  pageContentColumn?: string;
   pgExtension?: "pgvector" | "pgembedding" | PostgresEmbeddingExtension;
   extraColumns?: Column[];
 }
 
 export class KnexVectorStore extends VectorStore {
-  declare FilterType: KnexFilter;
+  declare FilterType: KnexFilterWithJoin;
 
   knex: KnexT;
 
   tableName: string;
+
+  pageContentColumn: string;
 
   pgExtension: PostgresEmbeddingExtension;
 
@@ -332,7 +364,8 @@ export class KnexVectorStore extends VectorStore {
     super(embeddings, args);
     this.embeddings = embeddings;
     this.knex = args.knex;
-    this.tableName = args.tableName ?? "summary_embeddings";
+    this.tableName = args.tableName ?? "documents";
+    this.pageContentColumn = args.pageContentColumn ?? "content";
     this.extraColumns = args.extraColumns ?? [];
 
     if (args.pgExtension === "pgvector") {
@@ -367,6 +400,7 @@ export class KnexVectorStore extends VectorStore {
    *       });
    *   });
    * }
+   * to leverage Postgres's RLS feature
    * @param query
    * @returns { KnexT.QueryBuilder | KnexT.Raw }
    */
@@ -378,30 +412,29 @@ export class KnexVectorStore extends VectorStore {
     vectors: number[][],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     documents: Document<Record<string, any>>[],
-    options: {
-      extraValues: (ColumnValue | null)[];
+    options?: {
+      extraColumns: (ColumnValue | null)[];
     }
   ): Promise<void> {
     await this.ensureTableInDatabase();
     const rows = vectors.map((embedding, idx) => {
-      const extraValues = Object.entries(options.extraValues[idx] ?? {}).reduce(
-        (acc, [key, value]) => {
-          // check if key is in this.extraColumns
-          const column = this.extraColumns.find(({ name }) => name === key);
-          if (column == null) return acc;
+      const extraColumns = Object.entries(
+        options?.extraColumns[idx] ?? {}
+      ).reduce((acc, [key, value]) => {
+        // check if key is in this.extraColumns
+        const column = this.extraColumns.find(({ name }) => name === key);
+        if (column == null) return acc;
 
-          acc[key] = value;
-          return acc;
-        },
-        {} as ColumnValue
-      );
+        acc[key] = value;
+        return acc;
+      }, {} as ColumnValue);
 
       const embeddingString = this.pgExtension.buildInsertionVector(embedding);
       const documentRow = {
-        pageContent: documents[idx].pageContent,
+        [this.pageContentColumn]: documents[idx].pageContent,
         embedding: embeddingString,
         metadata: documents[idx].metadata,
-        ...extraValues,
+        ...extraColumns,
       };
 
       return documentRow;
@@ -412,8 +445,8 @@ export class KnexVectorStore extends VectorStore {
   async addDocuments(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     documents: Document<Record<string, any>>[],
-    options: {
-      extraValues: (ColumnValue | null)[];
+    options?: {
+      extraColumns: (ColumnValue | null)[];
     }
   ): Promise<void | string[]> {
     const texts = documents.map(({ pageContent }) => pageContent);
@@ -425,12 +458,12 @@ export class KnexVectorStore extends VectorStore {
   }
 
   async ensureTableInDatabase(): Promise<void> {
-    await this.knex.raw(this.pgExtension.buildEnsureTableStatement());
+    await this.knex.raw(this.pgExtension.buildEnsureExtensionStatement());
     await this.knex.raw('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
 
     const columns = [
       '"id" uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY',
-      '"pageContent" text',
+      `"${this.pageContentColumn}" text`,
       '"metadata" jsonb',
       `"embedding" ${this.pgExtension.buildDataType()}`,
     ];
@@ -446,12 +479,23 @@ export class KnexVectorStore extends VectorStore {
     `);
   }
 
-  async fetchRows(
+  private async fetchRows(
     query: number[],
     k: number,
     filter?: this["FilterType"] | undefined,
     returnedColumns?: string[]
   ): Promise<SearchResult[]> {
+    const { metadataFilter, columnFilter, join: joinStatement } = filter ?? {};
+    let filterType: "metadata" | "column" | undefined;
+
+    if (metadataFilter && columnFilter) {
+      throw new Error("Cannot have both metadataFilter and columnFilter");
+    } else if (metadataFilter) {
+      filterType = "metadata";
+    } else if (columnFilter) {
+      filterType = "column";
+    }
+
     const vector = `[${query.join(",")}]`;
     const selectedColumns = [
       ...(returnedColumns ?? []),
@@ -463,16 +507,15 @@ export class KnexVectorStore extends VectorStore {
       this.knex
         .raw(
           this.pgExtension.buildFetchRowsStatement(
-            ["id", "pageContent", "metadata", ...selectedColumns],
+            ["id", this.pageContentColumn, "metadata", ...selectedColumns],
             this.tableName
           ),
           [vector]
         )
         .toString(),
-      this.buildSqlFilterStr(filter),
-      this.knex
-        .raw(`ORDER BY "_distance" LIMIT ?;`, [k])
-        .toString(),
+      joinStatement,
+      this.buildSqlFilterStr(metadataFilter ?? columnFilter, filterType),
+      this.knex.raw(`ORDER BY "_distance" LIMIT ?;`, [k]).toString(),
     ]
       .filter((x) => x != null)
       .join(" ");
@@ -489,7 +532,7 @@ export class KnexVectorStore extends VectorStore {
     const rows = await this.fetchRows(query, k, filter, ["_distance"]);
     return rows.map((row) => [
       new Document({
-        pageContent: row.pageContent,
+        pageContent: row[this.pageContentColumn as keyof typeof row] as string,
         metadata: row.metadata,
       }),
       row._distance,
@@ -539,7 +582,7 @@ export class KnexVectorStore extends VectorStore {
   }): Promise<void> {
     await this.ensureTableInDatabase();
     await this.knex.raw(
-      this.pgExtension.buildHNSWIndexStatement(this.tableName, {
+      this.pgExtension.buildHNSWIndexStatement(this.tableName, "embedding", {
         m,
         efConstruction,
         efSearch,
@@ -547,20 +590,49 @@ export class KnexVectorStore extends VectorStore {
     );
   }
 
+  buildTextSearchStatement(param: TextSearchValue, column: string) {
+    const { query, type, config } = param;
+    const lang = `'${config ?? "simple"}'`;
+    let queryOp = "to_tsquery";
+    if (type) {
+      switch (type) {
+        case "plain":
+          queryOp = "plainto_tsquery";
+          break;
+        case "phrase":
+          queryOp = "phraseto_tsquery";
+          break;
+        case "websearch":
+          queryOp = "websearch_to_tsquery";
+          break;
+        default:
+          throw new Error("Invalid text search type");
+      }
+    }
+
+    return this.knex
+      .raw(`to_tsvector(?, ?) @@ ${queryOp}(?, ?)`, [lang, column, lang, query])
+      .toString();
+  }
+
   /**
    * Build the SQL filter string from the filter object.
    * @param filter - The filter object
    * @returns
    */
-  buildSqlFilterStr(filter?: KnexFilter) {
+  buildSqlFilterStr(
+    filter?: KnexFilter,
+    type: "metadata" | "column" = "metadata"
+  ) {
     if (filter == null) return null;
 
     const buildClause = (
       key: string,
-      operator: string,
-      value: string | number
+      operator: ComparisonMapKey,
+      value: string | number | TextSearchValue
     ): string => {
-      const compRaw = ComparisonMap[operator as keyof typeof ComparisonMap];
+      const op = operator;
+      const compRaw = ComparisonMap[op];
 
       let typeCast;
       let arrow;
@@ -577,13 +649,27 @@ export class KnexVectorStore extends VectorStore {
       } else {
         throw new Error("Data type not supported");
       }
-
-      if (key !== "user_id") {
-        return this.knex
-          .raw(`metadata${arrow}"${key}" ${compRaw} ?${typeCast}`, [value])
-          .toString();
+      let columnKey;
+      if (key === this.pageContentColumn) {
+        columnKey = this.pageContentColumn;
       } else {
-        return this.knex.raw("user_id = ?", [value]).toString();
+        if (type === "column") {
+          columnKey = `"${key}"`;
+          typeCast = "";
+        } else {
+          columnKey = `metadata${arrow}"${key}"`;
+        }
+      }
+
+      if (op === "$textSearch") {
+        return this.buildTextSearchStatement(
+          value as TextSearchValue,
+          columnKey
+        );
+      } else {
+        return this.knex
+          .raw(`? ${compRaw} ?${typeCast}`, [columnKey, value])
+          .toString();
       }
     };
     const allowedOps = Object.keys(LogicalMap);
@@ -593,7 +679,7 @@ export class KnexVectorStore extends VectorStore {
         .map(([key, ops]) => {
           if (allowedOps.includes(key)) {
             const logicalParts = (ops as KnexFilter[]).map(recursiveBuild);
-            const separator = LogicalMap[key as keyof typeof LogicalMap];
+            const separator = LogicalMap[key as LogicalMapKey];
             return `(${logicalParts.join(` ${separator} `)})`;
           }
 
@@ -602,7 +688,7 @@ export class KnexVectorStore extends VectorStore {
             return Object.entries(ops as Record<string, any>)
               .map(([opName, value]) => {
                 if (!value) return null;
-                return buildClause(key, opName, value);
+                return buildClause(key, opName as ComparisonMapKey, value);
               })
               .filter(Boolean)
               .join(" AND ");

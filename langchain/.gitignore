@@ -178,6 +178,9 @@ vectorstores/faiss.d.ts
 vectorstores/weaviate.cjs
 vectorstores/weaviate.js
 vectorstores/weaviate.d.ts
+vectorstores/knex.cjs
+vectorstores/knex.js
+vectorstores/knex.d.ts
 vectorstores/lancedb.cjs
 vectorstores/lancedb.js
 vectorstores/lancedb.d.ts
