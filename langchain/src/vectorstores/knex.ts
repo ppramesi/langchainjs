@@ -58,6 +58,11 @@ export type ExtensionOpts = {
    * The number of dimensions of the embeddings.
    */
   dims?: number;
+
+  /**
+   * The Knex instance to use.
+   */
+  knex: KnexT;
 };
 
 const ComparisonMap = {
@@ -112,11 +117,14 @@ export abstract class PostgresEmbeddingExtension {
    */
   dims: number;
 
-  constructor(extensionOpts?: ExtensionOpts) {
-    const metric = extensionOpts?.metric ?? "cosine";
+  knexInstance: KnexT;
+
+  constructor(extensionOpts: ExtensionOpts) {
+    const metric = extensionOpts.metric ?? "cosine";
     this.validateSelectedMetric(metric);
     this.selectedMetric = metric;
-    this.dims = extensionOpts?.dims ?? 1536; // defaults to OpenAI 1536 embedding dims
+    this.dims = extensionOpts.dims ?? 1536; // defaults to OpenAI 1536 embedding dims
+    this.knexInstance = extensionOpts.knex;
   }
 
   /**
@@ -142,8 +150,9 @@ export abstract class PostgresEmbeddingExtension {
    * @returns {string} The SQL statement to fetch rows from the database.
    */
   abstract buildFetchRowsStatement(
-    returns: string[],
-    tableName: string
+    vector: number[],
+    tableName: string,
+    returns: string[]
   ): string;
 
   /**
@@ -166,6 +175,9 @@ export abstract class PostgresEmbeddingExtension {
 
   /**
    * Build the SQL statement to create an HNSW index on the embedding column.
+   * pgvector (post v0.5.0) and pgembedding both support HNSW indexes, but it's
+   * still the simplest form of indexing (i.e. no partitioned table index, partial
+   * index, etc etc.)
    * @param tableName - The name of the table to create the index on.
    * @param indexOpts - Options for the index.
    */
@@ -174,12 +186,21 @@ export abstract class PostgresEmbeddingExtension {
     columnName: string,
     indexOpts: { m?: number; efConstruction?: number; efSearch?: number }
   ): string;
+
+  abstract doQueryWrapper(
+    knexInstance: KnexT,
+    query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw
+  ): Promise<KnexT.QueryBuilder | KnexT.Raw>;
 }
 
 export class PGEmbeddingExt extends PostgresEmbeddingExtension {
   allowedMetrics: Metric[] = ["cosine", "l2", "manhattan"];
 
-  buildFetchRowsStatement(returns: string[], tableName: string): string {
+  buildFetchRowsStatement(
+    vector: number[],
+    tableName: string,
+    returns: string[]
+  ): string {
     let arrow;
     switch (this.selectedMetric) {
       case "cosine":
@@ -196,8 +217,16 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
     }
 
     const selectStatement = returns.length > 0 ? returns.join(", ") : "*";
+    const rawArrayStatement = this.knexInstance.raw(
+      `array[${vector.join(",")}]`
+    );
 
-    return `SELECT ${selectStatement}, embedding ${arrow} array? AS "_distance" FROM ${tableName}`;
+    return this.knexInstance
+      .raw(
+        `SELECT ${selectStatement}, embedding ${arrow} ? AS "_distance" FROM ${tableName}`,
+        [rawArrayStatement]
+      )
+      .toString();
   }
 
   buildEnsureExtensionStatement(): string {
@@ -244,12 +273,33 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
       ", "
     )});`;
   }
+
+  /**
+   * For some reason, pgembedding requires you to set enable_seqscan to off
+   * when using it with hnsw indexes. This function wraps the query with a
+   * transaction that sets enable_seqscan to off.
+   * @param knexInstance
+   * @param query 
+   * @returns 
+   */
+  doQueryWrapper(
+    knexInstance: KnexT,
+    query: (db: KnexT) => KnexT.Raw | KnexT.QueryBuilder
+  ): Promise<KnexT.Raw | KnexT.QueryBuilder> {
+    return knexInstance.transaction<KnexT.QueryBuilder | KnexT.Raw>((trx) =>
+      trx.raw("SET LOCAL enable_seqscan = off;").then(() => query(trx))
+    );
+  }
 }
 
 export class PGVectorExt extends PostgresEmbeddingExtension {
   allowedMetrics: Metric[] = ["cosine", "l2", "inner_product"];
 
-  buildFetchRowsStatement(returns: string[], tableName: string): string {
+  buildFetchRowsStatement(
+    vector: number[],
+    tableName: string,
+    returns: string[]
+  ): string {
     let embeddingStatement;
     switch (this.selectedMetric) {
       case "cosine":
@@ -266,8 +316,13 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
     }
 
     const selectStatement = returns.length > 0 ? returns.join(", ") : "*";
-
-    return `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM ${tableName}`;
+    const queryStr = `[${vector.join(",")}]`;
+    return this.knexInstance
+      .raw(
+        `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM ${tableName}`,
+        [queryStr]
+      )
+      .toString();
   }
 
   buildEnsureExtensionStatement(): string {
@@ -275,7 +330,7 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
   }
 
   buildDataType(): string {
-    return "vector";
+    return `vector(${this.dims})`;
   }
 
   buildInsertionVector(vector: number[]): string {
@@ -317,6 +372,13 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
       opts.length > 0 ? ` WITH (${opts.join(", ")})` : ""
     };${efSearchStr}`;
   }
+
+  doQueryWrapper(
+    knexInstance: KnexT,
+    query: (db: KnexT) => KnexT.Raw | KnexT.QueryBuilder
+  ): Promise<KnexT.Raw | KnexT.QueryBuilder> {
+    return query(knexInstance);
+  }
 }
 
 /**
@@ -341,6 +403,7 @@ export type Column = {
 
 export interface KnexVectorStoreArgs {
   knex: KnexT;
+  useHnswIndex: boolean;
   tableName?: string;
   pageContentColumn?: string;
   pgExtension?: "pgvector" | "pgembedding" | PostgresEmbeddingExtension;
@@ -360,18 +423,21 @@ export class KnexVectorStore extends VectorStore {
 
   extraColumns: Column[];
 
+  useHnswIndex: boolean;
+
   constructor(embeddings: Embeddings, args: KnexVectorStoreArgs) {
     super(embeddings, args);
     this.embeddings = embeddings;
     this.knex = args.knex;
+    this.useHnswIndex = args.useHnswIndex;
     this.tableName = args.tableName ?? "documents";
     this.pageContentColumn = args.pageContentColumn ?? "content";
     this.extraColumns = args.extraColumns ?? [];
 
     if (args.pgExtension === "pgvector") {
-      this.pgExtension = new PGVectorExt();
+      this.pgExtension = new PGVectorExt({ knex: this.knex });
     } else if (args.pgExtension === "pgembedding") {
-      this.pgExtension = new PGEmbeddingExt();
+      this.pgExtension = new PGEmbeddingExt({ knex: this.knex });
     } else if (
       args.pgExtension != null &&
       // eslint-disable-next-line no-instanceof/no-instanceof
@@ -379,7 +445,7 @@ export class KnexVectorStore extends VectorStore {
     ) {
       this.pgExtension = args.pgExtension;
     } else {
-      this.pgExtension = new PGVectorExt();
+      this.pgExtension = new PGVectorExt({ knex: this.knex });
     }
   }
 
@@ -405,7 +471,11 @@ export class KnexVectorStore extends VectorStore {
    * @returns { KnexT.QueryBuilder | KnexT.Raw }
    */
   protected doQuery(query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw) {
-    return query(this.knex);
+    if (this.useHnswIndex) {
+      return this.pgExtension.doQueryWrapper(this.knex, query);
+    } else {
+      return query(this.knex);
+    }
   }
 
   async addVectors(
@@ -496,7 +566,6 @@ export class KnexVectorStore extends VectorStore {
       filterType = "column";
     }
 
-    const vector = `[${query.join(",")}]`;
     const selectedColumns = [
       ...(returnedColumns ?? []),
       ...this.extraColumns
@@ -504,15 +573,12 @@ export class KnexVectorStore extends VectorStore {
         .map(({ name }) => name),
     ];
     const queryStr = [
-      this.knex
-        .raw(
-          this.pgExtension.buildFetchRowsStatement(
-            ["id", this.pageContentColumn, "metadata", ...selectedColumns],
-            this.tableName
-          ),
-          [vector]
-        )
-        .toString(),
+      this.pgExtension.buildFetchRowsStatement(query, this.tableName, [
+        "id",
+        this.pageContentColumn,
+        "metadata",
+        ...selectedColumns,
+      ]),
       joinStatement,
       this.buildSqlFilterStr(metadataFilter ?? columnFilter, filterType),
       this.knex.raw(`ORDER BY "_distance" LIMIT ?;`, [k]).toString(),
@@ -566,9 +632,9 @@ export class KnexVectorStore extends VectorStore {
   }
 
   /**
-   * Build the HNSW index on the embedding column. Should be called after
-   * adding vectors to the database, but before doing similarity search if
-   * you plan to have a large number of rows in the table.
+   * Build the HNSW index on the embedding column. Should be
+   * called before doing similarity search if you plan to have
+   * a large number of rows in the table.
    * @param buildIndexOpt
    */
   async buildIndex({
@@ -579,7 +645,7 @@ export class KnexVectorStore extends VectorStore {
     m?: number;
     efConstruction?: number;
     efSearch?: number;
-  }): Promise<void> {
+  } = {}): Promise<void> {
     await this.ensureTableInDatabase();
     await this.knex.raw(
       this.pgExtension.buildHNSWIndexStatement(this.tableName, "embedding", {
