@@ -13,6 +13,24 @@ export type TextSearchValue = {
   config?: string;
 };
 
+export type OnCondition = {
+  left: string;
+  right: string;
+  operator?: "=" | "<>" | ">" | ">=" | "<" | "<=";
+};
+
+export type JoinStatement = {
+  op:
+    | "JOIN"
+    | "LEFT JOIN"
+    | "RIGHT JOIN"
+    | "FULL JOIN"
+    | "CROSS JOIN"
+    | "INNER JOIN";
+  table: string;
+  on: OnCondition[]; // array to support multiple conditions
+};
+
 export type ComparisonOperator =
   | { $eq: FilterValue }
   | { $gt: FilterValue }
@@ -34,12 +52,12 @@ export type KnexFilterWithJoin =
   | {
       metadataFilter?: never;
       columnFilter?: KnexFilter;
-      join?: string;
+      join?: JoinStatement | JoinStatement[];
     }
   | {
       metadataFilter?: KnexFilter;
       columnFilter?: never;
-      join?: string;
+      join?: JoinStatement | JoinStatement[];
     };
 
 export type Metric = "cosine" | "l2" | "manhattan" | "inner_product";
@@ -410,6 +428,13 @@ export type Column = {
   type: string;
   name: string;
   returned: boolean;
+  notNull?: boolean;
+  references?:
+    | string
+    | {
+        table: string;
+        column: string;
+      };
 };
 
 export interface KnexVectorStoreArgs {
@@ -550,7 +575,14 @@ export class KnexVectorStore extends VectorStore {
     ];
 
     const extraColumns = this.extraColumns.map(
-      ({ name, type }) => `${name} ${type}`
+      ({ name, type, notNull, references }) =>
+        `${name} ${type}${notNull ? " NOT NULL" : ""} ${
+          references
+            ? typeof references === "string"
+              ? ` REFERENCES ${references}`
+              : ` REFERENCES ${references.table} (${references.column})`
+            : ""
+        }`
     );
 
     await this.knex.raw(`
@@ -561,6 +593,31 @@ export class KnexVectorStore extends VectorStore {
     `);
   }
 
+  private buildJoinStatement(statement: JoinStatement): string {
+    const { op, table, on } = statement;
+    if (
+      ![
+        "JOIN",
+        "LEFT JOIN",
+        "RIGHT JOIN",
+        "FULL JOIN",
+        "CROSS JOIN",
+        "INNER JOIN",
+      ].includes(op)
+    ) {
+      throw new Error(`Invalid join statement: ${op}`);
+    }
+
+    const onConditions = on
+      .map(
+        (condition) =>
+          `${condition.left} ${condition.operator || "="} ${condition.right}`
+      )
+      .join(" AND ");
+
+    return `${op} ${table} ON ${onConditions}`;
+  }
+
   private async fetchRows(
     query: number[],
     k: number,
@@ -569,6 +626,17 @@ export class KnexVectorStore extends VectorStore {
   ): Promise<SearchResult[]> {
     const { metadataFilter, columnFilter, join: joinStatement } = filter ?? {};
     let filterType: "metadata" | "column" | undefined;
+
+    let joinStatements: string[];
+    if (Array.isArray(joinStatement)) {
+      joinStatements = joinStatement.map((statement) =>
+        this.buildJoinStatement(statement)
+      );
+    } else {
+      joinStatements = joinStatement
+        ? [this.buildJoinStatement(joinStatement)]
+        : [];
+    }
 
     if (metadataFilter && columnFilter) {
       throw new Error("Cannot have both metadataFilter and columnFilter");
@@ -591,7 +659,7 @@ export class KnexVectorStore extends VectorStore {
         "metadata",
         ...selectedColumns,
       ]),
-      joinStatement,
+      ...joinStatements,
       this.buildSqlFilterStr(metadataFilter ?? columnFilter, filterType),
       this.knex.raw(`ORDER BY "_distance" LIMIT ?;`, [k]).toString(),
     ]
