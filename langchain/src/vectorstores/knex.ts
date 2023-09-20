@@ -24,12 +24,8 @@ export type ComparisonOperator =
 
 export type LogicalOperator = { $and: KnexFilter[] } | { $or: KnexFilter[] };
 
-export type ExcludeKeyValueFilter = "$filter" | "$join";
-
 export type KeyValueFilter = {
   [key: string]: FilterValue | ComparisonOperator;
-} & {
-  [key in ExcludeKeyValueFilter]?: never;
 };
 
 export type KnexFilter = KeyValueFilter | LogicalOperator;
@@ -108,8 +104,6 @@ export type HNSWIndexStatementOpts = {
  * extension is pgvector, but pgembedding can also be used.
  */
 export abstract class PostgresEmbeddingExtension {
-  abstract allowedMetrics: Metric[];
-
   selectedMetric: Metric;
 
   /**
@@ -127,6 +121,8 @@ export abstract class PostgresEmbeddingExtension {
     this.knexInstance = extensionOpts.knex;
   }
 
+  abstract allowedMetrics(): Metric[];
+
   /**
    * Validate the selected metric. Check if it is one of the allowed metrics.
    * pgvector supports cosine, l2, and inner_product. pgembedding supports
@@ -134,9 +130,9 @@ export abstract class PostgresEmbeddingExtension {
    * @param metric - The metric to validate.
    */
   private validateSelectedMetric(metric: Metric) {
-    if (!this.allowedMetrics.includes(metric)) {
+    if (!this.allowedMetrics().includes(metric)) {
       throw new Error(
-        `Invalid metric: ${metric}. Allowed metrics are: ${this.allowedMetrics.join(
+        `Invalid metric: ${metric}. Allowed metrics are: ${this.allowedMetrics().join(
           ", "
         )}`
       );
@@ -182,19 +178,22 @@ export abstract class PostgresEmbeddingExtension {
    * @param indexOpts - Options for the index.
    */
   abstract buildHNSWIndexStatement(
+    indexName: string,
     tableName: string,
     columnName: string,
     indexOpts: { m?: number; efConstruction?: number; efSearch?: number }
   ): string;
 
-  abstract doQueryWrapper(
+  abstract runQueryWrapper(
     knexInstance: KnexT,
     query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw
   ): Promise<KnexT.QueryBuilder | KnexT.Raw>;
 }
 
 export class PGEmbeddingExt extends PostgresEmbeddingExtension {
-  allowedMetrics: Metric[] = ["cosine", "l2", "manhattan"];
+  allowedMetrics(): Metric[] {
+    return ["cosine", "l2", "manhattan"];
+  }
 
   buildFetchRowsStatement(
     vector: number[],
@@ -217,6 +216,14 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
     }
 
     const selectStatement = returns.length > 0 ? returns.join(", ") : "*";
+
+    /**
+     * pgembedding uses array[] for the data type when
+     * doing a SELECT query, which will throw an error
+     * if we do something like raw("array?", [vector])
+     * where vector is a string like "[1,2,3]". So instead
+     * we do raw("array[1,2,3]") and that somehow works.
+     */
     const rawArrayStatement = this.knexInstance.raw(
       `array[${vector.join(",")}]`
     );
@@ -242,6 +249,7 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
   }
 
   buildHNSWIndexStatement(
+    indexName: string,
     tableName: string,
     columnName: string,
     {
@@ -269,7 +277,7 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
       default:
         throw new Error("Invalid metric");
     }
-    return `CREATE INDEX ON ${tableName} USING hnsw(${columnName}${ops}) WITH (${opts.join(
+    return `CREATE INDEX IF NOT EXISTS ${indexName} ON ${tableName} USING hnsw(${columnName}${ops}) WITH (${opts.join(
       ", "
     )});`;
   }
@@ -279,10 +287,10 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
    * when using it with hnsw indexes. This function wraps the query with a
    * transaction that sets enable_seqscan to off.
    * @param knexInstance
-   * @param query 
-   * @returns 
+   * @param query
+   * @returns
    */
-  doQueryWrapper(
+  runQueryWrapper(
     knexInstance: KnexT,
     query: (db: KnexT) => KnexT.Raw | KnexT.QueryBuilder
   ): Promise<KnexT.Raw | KnexT.QueryBuilder> {
@@ -293,7 +301,9 @@ export class PGEmbeddingExt extends PostgresEmbeddingExtension {
 }
 
 export class PGVectorExt extends PostgresEmbeddingExtension {
-  allowedMetrics: Metric[] = ["cosine", "l2", "inner_product"];
+  allowedMetrics(): Metric[] {
+    return ["cosine", "l2", "inner_product"];
+  }
 
   buildFetchRowsStatement(
     vector: number[],
@@ -338,6 +348,7 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
   }
 
   buildHNSWIndexStatement(
+    indexName: string,
     tableName: string,
     columnName: string,
     {
@@ -368,12 +379,12 @@ export class PGVectorExt extends PostgresEmbeddingExtension {
       default:
         throw new Error("Invalid metric");
     }
-    return `CREATE INDEX ON ${tableName} USING hnsw(${columnName}${ops})${
+    return `CREATE INDEX ${indexName} ON ${tableName} USING hnsw(${columnName}${ops})${
       opts.length > 0 ? ` WITH (${opts.join(", ")})` : ""
     };${efSearchStr}`;
   }
 
-  doQueryWrapper(
+  runQueryWrapper(
     knexInstance: KnexT,
     query: (db: KnexT) => KnexT.Raw | KnexT.QueryBuilder
   ): Promise<KnexT.Raw | KnexT.QueryBuilder> {
@@ -457,7 +468,7 @@ export class KnexVectorStore extends VectorStore {
    * Functions that executes the SQL queries. Can be used to modify how the queries
    * are being executed by inheriting classes. Very very useful when combined
    * with, let's say, transactions, by doing something like
-   * protected doQuery(query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw) {
+   * protected runQuery(query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw) {
    *   return this.knex.transaction((trx) => {
    *     return trx
    *       .raw(`SELECT set_config(?, ?, true)`, someValueA, someValueB)
@@ -470,9 +481,9 @@ export class KnexVectorStore extends VectorStore {
    * @param query
    * @returns { KnexT.QueryBuilder | KnexT.Raw }
    */
-  protected doQuery(query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw) {
+  protected runQuery(query: (db: KnexT) => KnexT.QueryBuilder | KnexT.Raw) {
     if (this.useHnswIndex) {
-      return this.pgExtension.doQueryWrapper(this.knex, query);
+      return this.pgExtension.runQueryWrapper(this.knex, query);
     } else {
       return query(this.knex);
     }
@@ -509,7 +520,7 @@ export class KnexVectorStore extends VectorStore {
 
       return documentRow;
     });
-    await this.doQuery((database) => database(this.tableName).insert(rows));
+    await this.runQuery((database) => database(this.tableName).insert(rows));
   }
 
   async addDocuments(
@@ -532,20 +543,21 @@ export class KnexVectorStore extends VectorStore {
     await this.knex.raw('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
 
     const columns = [
-      '"id" uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY',
-      `"${this.pageContentColumn}" text`,
-      '"metadata" jsonb',
-      `"embedding" ${this.pgExtension.buildDataType()}`,
+      "id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
+      `${this.pageContentColumn} text`,
+      "metadata jsonb",
+      `embedding ${this.pgExtension.buildDataType()}`,
     ];
 
     const extraColumns = this.extraColumns.map(
-      ({ name, type }) => `"${name}" ${type}`
+      ({ name, type }) => `${name} ${type}`
     );
 
     await this.knex.raw(`
-      CREATE TABLE IF NOT EXISTS ${this.tableName} (
-        ${[...columns, ...extraColumns].join("\n,")}
-      );
+      CREATE TABLE IF NOT EXISTS ${this.tableName} (${[
+      ...columns,
+      ...extraColumns,
+    ].join(", ")});
     `);
   }
 
@@ -585,7 +597,20 @@ export class KnexVectorStore extends VectorStore {
     ]
       .filter((x) => x != null)
       .join(" ");
-    const results = await this.doQuery((database) => database.raw(queryStr));
+    const results = await this.runQuery((database) => database.raw(queryStr));
+    if ("embedding" in results.rows[0]) {
+      results.rows.forEach((_: object, idx: number) => {
+        if (typeof results.rows[idx].embedding === "string") {
+          try {
+            results.rows[idx].embedding = JSON.parse(
+              results.rows[idx].embedding
+            );
+          } catch (error) {
+            throw new Error("Error parsing embedding");
+          }
+        }
+      });
+    }
     return results.rows as SearchResult[];
   }
 
@@ -595,7 +620,7 @@ export class KnexVectorStore extends VectorStore {
     filter?: this["FilterType"] | undefined
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<[Document<Record<string, any>>, number][]> {
-    const rows = await this.fetchRows(query, k, filter, ["_distance"]);
+    const rows = await this.fetchRows(query, k, filter);
     return rows.map((row) => [
       new Document({
         pageContent: row[this.pageContentColumn as keyof typeof row] as string,
@@ -611,7 +636,9 @@ export class KnexVectorStore extends VectorStore {
   ): Promise<Document[]> {
     const { k, fetchK = 20, lambda = 0.7, filter } = options;
     const queryEmbedding = await this.embeddings.embedQuery(query);
-    const results = await this.fetchRows(queryEmbedding, fetchK, filter);
+    const results = await this.fetchRows(queryEmbedding, fetchK, filter, [
+      "embedding",
+    ]);
 
     const embeddings = results.map((result) => result.embedding);
     const mmrIndexes = maximalMarginalRelevance(
@@ -637,28 +664,41 @@ export class KnexVectorStore extends VectorStore {
    * a large number of rows in the table.
    * @param buildIndexOpt
    */
-  async buildIndex({
-    m,
-    efConstruction,
-    efSearch,
-  }: {
-    m?: number;
-    efConstruction?: number;
-    efSearch?: number;
-  } = {}): Promise<void> {
+  async buildIndex(
+    indexName: string,
+    {
+      m,
+      efConstruction,
+      efSearch,
+    }: {
+      m?: number;
+      efConstruction?: number;
+      efSearch?: number;
+    } = {}
+  ): Promise<void> {
     await this.ensureTableInDatabase();
     await this.knex.raw(
-      this.pgExtension.buildHNSWIndexStatement(this.tableName, "embedding", {
-        m,
-        efConstruction,
-        efSearch,
-      })
+      this.pgExtension.buildHNSWIndexStatement(
+        indexName,
+        this.tableName,
+        "embedding",
+        {
+          m,
+          efConstruction,
+          efSearch,
+        }
+      )
     );
+  }
+
+  async dropIndex(indexName: string): Promise<void> {
+    await this.ensureTableInDatabase();
+    await this.knex.raw(`DROP INDEX IF EXISTS ${indexName};`);
   }
 
   buildTextSearchStatement(param: TextSearchValue, column: string) {
     const { query, type, config } = param;
-    const lang = `'${config ?? "simple"}'`;
+    const lang = `${config ?? "simple"}`;
     let queryOp = "to_tsquery";
     if (type) {
       switch (type) {
@@ -699,17 +739,19 @@ export class KnexVectorStore extends VectorStore {
     ): string => {
       const op = operator;
       const compRaw = ComparisonMap[op];
+      const myValue =
+        typeof value === "object" && "query" in value ? value.query : value;
 
       let typeCast;
       let arrow;
 
-      if (isString(value)) {
+      if (isString(myValue)) {
         typeCast = "::text";
         arrow = "->>";
-      } else if (isInt(value)) {
+      } else if (isInt(myValue)) {
         typeCast = "::int";
         arrow = "->";
-      } else if (isFloat(value)) {
+      } else if (isFloat(myValue)) {
         typeCast = "::float";
         arrow = "->";
       } else {
@@ -720,10 +762,10 @@ export class KnexVectorStore extends VectorStore {
         columnKey = this.pageContentColumn;
       } else {
         if (type === "column") {
-          columnKey = `"${key}"`;
+          columnKey = `${key}`;
           typeCast = "";
         } else {
-          columnKey = `metadata${arrow}"${key}"`;
+          columnKey = `metadata${arrow}'${key}'`;
         }
       }
 
@@ -734,7 +776,7 @@ export class KnexVectorStore extends VectorStore {
         );
       } else {
         return this.knex
-          .raw(`? ${compRaw} ?${typeCast}`, [columnKey, value])
+          .raw(`? ${compRaw} ?${typeCast}`, [this.knex.raw(columnKey), myValue])
           .toString();
       }
     };

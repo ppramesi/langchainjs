@@ -11,77 +11,138 @@ import Knex from "knex";
 import { OpenAIEmbeddings } from "../../embeddings/openai.js";
 import { KnexVectorStore } from "../knex.js";
 
-let knex: Knex.Knex;
-if (!process.env.KNEX_POSTGRES_URL) {
-  throw new Error("KNEX_POSTGRES_URL not set");
+/**
+ * We're using two different postgres instances for each extension. Should setup with docker,
+ * see https://github.com/ppramesi/vector-pg-tests/blob/main/database_pgvector/Dockerfile
+ * and https://github.com/ppramesi/vector-pg-tests/blob/main/database_pgembedding/Dockerfile
+ * for dockerfile configs.
+ */
+let pgvectorKnex: Knex.Knex;
+let pgembeddingKnex: Knex.Knex;
+
+if (
+  !process.env.POSTGRES_HOST ||
+  !process.env.POSTGRES_PGVECTOR_DB ||
+  !process.env.POSTGRES_PGVECTOR_USER ||
+  !process.env.POSTGRES_PGVECTOR_PASSWORD ||
+  !process.env.POSTGRES_PGVECTOR_PORT
+) {
+  throw new Error("PGVECTOR environment variables not set");
+}
+
+if (
+  !process.env.POSTGRES_HOST ||
+  !process.env.POSTGRES_PGEMBEDDING_DB ||
+  !process.env.POSTGRES_PGEMBEDDING_USER ||
+  !process.env.POSTGRES_PGEMBEDDING_PASSWORD ||
+  !process.env.POSTGRES_PGEMBEDDING_PORT
+) {
+  throw new Error("PGEMBEDDING environment variables not set");
 }
 
 beforeAll(async () => {
-  knex = Knex.default({
+  pgvectorKnex = Knex.default({
     client: "postgresql",
     connection: {
-      connectionString: process.env.KNEX_POSTGRES_URL,
-      ssl: {
-        rejectUnauthorized: false,
-      },
+      host: process.env.POSTGRES_HOST,
+      database: process.env.POSTGRES_PGVECTOR_DB,
+      user: process.env.POSTGRES_PGVECTOR_USER,
+      password: process.env.POSTGRES_PGVECTOR_PASSWORD,
+      port: Number(process.env.POSTGRES_PGVECTOR_PORT),
     },
+    pool: { min: 2, max: 20 },
+  });
+  pgembeddingKnex = Knex.default({
+    client: "postgresql",
+    connection: {
+      host: process.env.POSTGRES_HOST,
+      database: process.env.POSTGRES_PGEMBEDDING_DB,
+      user: process.env.POSTGRES_PGEMBEDDING_USER,
+      password: process.env.POSTGRES_PGEMBEDDING_PASSWORD,
+      port: Number(process.env.POSTGRES_PGEMBEDDING_PORT),
+    },
+    pool: { min: 2, max: 20 },
   });
 });
 
 beforeEach(async () => {
-  await knex.raw(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
-  await knex.raw("CREATE EXTENSION IF NOT EXISTS vector;");
-
   /**
    * 🚨🚨🚨 WARNING WARNING WARNING 🚨🚨🚨
    * We're dropping knex_embeddings table first to make sure the test
    * is idempotent. This means that if you have a table called
    * knex_embeddings in your database, it will be dropped.
    */
-  await knex.schema.dropTableIfExists("knex_embeddings");
+  await Promise.all([
+    pgvectorKnex.schema.dropTableIfExists("knex_embeddings"),
+    pgembeddingKnex.schema.dropTableIfExists("knex_embeddings"),
+  ]);
 
-  await knex.schema.createTableIfNotExists("knex_embeddings", (table) => {
-    table.uuid("id").primary().defaultTo(knex.raw("uuid_generate_v4()"));
-    table.text("content");
-    table.specificType("embedding", "vector");
-    table.jsonb("metadata");
-    table.text("extra_stuff");
+  const embedding = new OpenAIEmbeddings();
+
+  const pgvKnexVS = new KnexVectorStore(embedding, {
+    knex: pgvectorKnex,
+    useHnswIndex: false,
+    tableName: "knex_embeddings",
+    pageContentColumn: "content",
+    extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
+    pgExtension: "pgvector",
   });
+  const pgeKnexVS = new KnexVectorStore(embedding, {
+    knex: pgembeddingKnex,
+    useHnswIndex: false,
+    tableName: "knex_embeddings",
+    pageContentColumn: "content",
+    extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
+    pgExtension: "pgembedding",
+  });
+
+  await Promise.all([
+    pgvKnexVS.ensureTableInDatabase(),
+    pgeKnexVS.ensureTableInDatabase(),
+  ]);
 });
 
 afterEach(async () => {
-  await knex.schema.dropTable("knex_embeddings");
+  await Promise.all([
+    pgvectorKnex.schema.dropTableIfExists("knex_embeddings"),
+    pgembeddingKnex.schema.dropTableIfExists("knex_embeddings"),
+  ]);
 });
 
 afterAll(async () => {
-  await knex.destroy();
+  await Promise.all([pgvectorKnex.destroy(), pgembeddingKnex.destroy()]);
 });
 
 test("Build index pgvector", async () => {
   const embedding = new OpenAIEmbeddings();
   const knexVS = new KnexVectorStore(embedding, {
-    knex,
+    knex: pgvectorKnex,
     useHnswIndex: false,
     tableName: "knex_embeddings",
     pageContentColumn: "content",
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
+    pgExtension: "pgvector",
   });
+
   try {
-    await knexVS.buildIndex();
+    await knexVS.buildIndex("test_hnsw_index");
     expect(true).toBe(true);
   } catch (error) {
     expect(error).toBe(null);
+  } finally {
+    await knexVS.dropIndex("test_hnsw_index");
   }
 });
 
 test("MMR and Similarity Search Test pgvector", async () => {
   const embedding = new OpenAIEmbeddings();
   const knexVS = new KnexVectorStore(embedding, {
-    knex,
+    knex: pgvectorKnex,
     useHnswIndex: false,
     tableName: "knex_embeddings",
     pageContentColumn: "content",
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
+    pgExtension: "pgvector",
   });
 
   const createdAt = new Date().getTime();
@@ -146,11 +207,12 @@ test("MMR and Similarity Search Test pgvector", async () => {
 test("Building WHERE query test pgvector", () => {
   const embedding = new OpenAIEmbeddings();
   const knexVS = new KnexVectorStore(embedding, {
-    knex,
+    knex: pgvectorKnex,
     useHnswIndex: false,
     tableName: "knex_embeddings",
     pageContentColumn: "content",
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
+    pgExtension: "pgvector",
   });
 
   const queryMetadata = knexVS.buildSqlFilterStr(
@@ -160,6 +222,7 @@ test("Building WHERE query test pgvector", () => {
         { hello: "stuff" },
         {
           $and: [
+            { hello: "stuff" },
             {
               content: {
                 $textSearch: {
@@ -177,7 +240,7 @@ test("Building WHERE query test pgvector", () => {
   );
 
   expect(queryMetadata).toBe(
-    `WHERE (metadata->>"stuff" = 'hello'::text OR metadata->>"hello" = 'stuff'::text OR (to_tsvector('simple', 'content') @@ plainto_tsquery('english', 'hello')))`
+    `WHERE (metadata->>'stuff' = 'hello'::text OR metadata->>'hello' = 'stuff'::text OR (metadata->>'hello' = 'stuff'::text AND to_tsvector('english', 'content') @@ plainto_tsquery('english', 'hello')))`
   );
 
   const queryColumn = knexVS.buildSqlFilterStr(
@@ -187,6 +250,7 @@ test("Building WHERE query test pgvector", () => {
         { hello: "stuff" },
         {
           $and: [
+            { hello: "stuff" },
             {
               content: {
                 $textSearch: {
@@ -204,33 +268,35 @@ test("Building WHERE query test pgvector", () => {
   );
 
   expect(queryColumn).toBe(
-    `WHERE ("stuff" = 'hello' OR "hello" = 'stuff' OR (to_tsvector('simple', 'content') @@ plainto_tsquery('english', 'hello')))`
+    `WHERE (stuff = 'hello' OR hello = 'stuff' OR (hello = 'stuff' AND to_tsvector('english', 'content') @@ plainto_tsquery('english', 'hello')))`
   );
 });
 
-// Skipping tests for pgembedding because you need to install pgembedding extension first, so like install pgembedding and then do separate test.
-test.skip("Build index pgembedding", async () => {
+test("Build index pgembedding", async () => {
   const embedding = new OpenAIEmbeddings();
   const knexVS = new KnexVectorStore(embedding, {
-    knex,
+    knex: pgembeddingKnex,
     useHnswIndex: false,
     tableName: "knex_embeddings",
     pageContentColumn: "content",
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtension: "pgembedding",
   });
+
   try {
-    await knexVS.buildIndex();
+    await knexVS.buildIndex("test_hnsw_index");
     expect(true).toBe(true);
   } catch (error) {
     expect(error).toBe(null);
+  } finally {
+    await knexVS.dropIndex("test_hnsw_index");
   }
 });
 
-test.skip("MMR and Similarity Search Test pgembedding", async () => {
+test("MMR and Similarity Search Test pgembedding", async () => {
   const embedding = new OpenAIEmbeddings();
   const knexVS = new KnexVectorStore(embedding, {
-    knex,
+    knex: pgembeddingKnex,
     useHnswIndex: false,
     tableName: "knex_embeddings",
     pageContentColumn: "content",
@@ -297,10 +363,10 @@ test.skip("MMR and Similarity Search Test pgembedding", async () => {
   expect(mmrResults.length).toBe(3);
 });
 
-test.skip("Building WHERE query test pgembedding", () => {
+test("Building WHERE query test pgembedding", () => {
   const embedding = new OpenAIEmbeddings();
   const knexVS = new KnexVectorStore(embedding, {
-    knex,
+    knex: pgembeddingKnex,
     useHnswIndex: false,
     tableName: "knex_embeddings",
     pageContentColumn: "content",
@@ -315,6 +381,7 @@ test.skip("Building WHERE query test pgembedding", () => {
         { hello: "stuff" },
         {
           $and: [
+            { hello: "stuff" },
             {
               content: {
                 $textSearch: {
@@ -332,7 +399,7 @@ test.skip("Building WHERE query test pgembedding", () => {
   );
 
   expect(queryMetadata).toBe(
-    `WHERE (metadata->>"stuff" = 'hello'::text OR metadata->>"hello" = 'stuff'::text OR (to_tsvector('simple', 'content') @@ plainto_tsquery('english', 'hello')))`
+    `WHERE (metadata->>'stuff' = 'hello'::text OR metadata->>'hello' = 'stuff'::text OR (metadata->>'hello' = 'stuff'::text AND to_tsvector('english', 'content') @@ plainto_tsquery('english', 'hello')))`
   );
 
   const queryColumn = knexVS.buildSqlFilterStr(
@@ -342,6 +409,7 @@ test.skip("Building WHERE query test pgembedding", () => {
         { hello: "stuff" },
         {
           $and: [
+            { hello: "stuff" },
             {
               content: {
                 $textSearch: {
@@ -359,6 +427,6 @@ test.skip("Building WHERE query test pgembedding", () => {
   );
 
   expect(queryColumn).toBe(
-    `WHERE ("stuff" = 'hello' OR "hello" = 'stuff' OR (to_tsvector('simple', 'content') @@ plainto_tsquery('english', 'hello')))`
+    `WHERE (stuff = 'hello' OR hello = 'stuff' OR (hello = 'stuff' AND to_tsvector('english', 'content') @@ plainto_tsquery('english', 'hello')))`
   );
 });
