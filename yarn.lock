@@ -13693,6 +13693,8 @@ __metadata:
       optional: true
     jsdom:
       optional: true
+    knex:
+      optional: true
     llmonitor:
       optional: true
     mammoth:
