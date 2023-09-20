@@ -139,6 +139,9 @@ export interface OptionalImportMap {
   "langchain/vectorstores/opensearch"?:
     | typeof import("../vectorstores/opensearch.js")
     | Promise<typeof import("../vectorstores/opensearch.js")>;
+  "langchain/vectorstores/pgvector"?:
+    | typeof import("../vectorstores/pgvector.js")
+    | Promise<typeof import("../vectorstores/pgvector.js")>;
   "langchain/vectorstores/milvus"?:
     | typeof import("../vectorstores/milvus.js")
     | Promise<typeof import("../vectorstores/milvus.js")>;
@@ -217,6 +220,9 @@ export interface OptionalImportMap {
   "langchain/document_loaders/web/notionapi"?:
     | typeof import("../document_loaders/web/notionapi.js")
     | Promise<typeof import("../document_loaders/web/notionapi.js")>;
+  "langchain/document_loaders/web/pdf"?:
+    | typeof import("../document_loaders/web/pdf.js")
+    | Promise<typeof import("../document_loaders/web/pdf.js")>;
   "langchain/document_loaders/web/recursive_url"?:
     | typeof import("../document_loaders/web/recursive_url.js")
     | Promise<typeof import("../document_loaders/web/recursive_url.js")>;
@@ -322,6 +328,9 @@ export interface OptionalImportMap {
   "langchain/retrievers/self_query/weaviate"?:
     | typeof import("../retrievers/self_query/weaviate.js")
     | Promise<typeof import("../retrievers/self_query/weaviate.js")>;
+  "langchain/cache/cloudflare_kv"?:
+    | typeof import("../cache/cloudflare_kv.js")
+    | Promise<typeof import("../cache/cloudflare_kv.js")>;
   "langchain/cache/momento"?:
     | typeof import("../cache/momento.js")
     | Promise<typeof import("../cache/momento.js")>;
@@ -340,6 +349,9 @@ export interface OptionalImportMap {
   "langchain/stores/file/node"?:
     | typeof import("../stores/file/node.js")
     | Promise<typeof import("../stores/file/node.js")>;
+  "langchain/stores/message/cloudflare_d1"?:
+    | typeof import("../stores/message/cloudflare_d1.js")
+    | Promise<typeof import("../stores/message/cloudflare_d1.js")>;
   "langchain/stores/message/dynamodb"?:
     | typeof import("../stores/message/dynamodb.js")
     | Promise<typeof import("../stores/message/dynamodb.js")>;
