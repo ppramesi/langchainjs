@@ -374,7 +374,7 @@ export class PGVectorExt<
     if (disambiguate) {
       selectStatement =
         returns.length > 0
-          ? returns.map((col) => `${tableName}.${col}`).join(", ")
+          ? returns.map((col) => `${tableName}.${col} AS ${col}`).join(", ")
           : "*";
     } else {
       selectStatement = returns.length > 0 ? returns.join(", ") : "*";
