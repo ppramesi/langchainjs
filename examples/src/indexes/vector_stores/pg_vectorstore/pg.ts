@@ -14,10 +14,12 @@ const pgInstance = pgp({
 export async function run() {
   const embedding = new OpenAIEmbeddings();
   const vectorStore = new PGVectorStore(embedding, {
-    pgDb: pgInstance,
+    postgresConnectionOptions: pgInstance,
     useHnswIndex: false,
     tableName: "pg_embeddings",
-    pageContentColumn: "content", // defaults to "content"
+    columns: {
+      contentColumnName: "content", // defaults to content
+    },
     /**
      * These are extra columns that will be added to the table or should
      * already by on the table. Useful for filtering + joining.
@@ -118,6 +120,15 @@ export async function run() {
     metadataFilter: {
       stuff: "right",
     },
+  });
+
+  /**
+   * Similarity search can also be a regular JSON, which will be
+   * converted to a WHERE query on metadata with "contains" operator.
+   * e.g. WHERE metadata @> '{"stuff": "right"}'
+   */
+  await vectorStore.similaritySearch("This is a long text", 1, {
+    stuff: "right",
   });
 
   /**

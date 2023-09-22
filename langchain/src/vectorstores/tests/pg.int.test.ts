@@ -77,18 +77,22 @@ beforeEach(async () => {
   const embedding = new OpenAIEmbeddings();
 
   const pgvKnexVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgvector,
+    postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgvector", dims: 1536 },
   });
   const pgeKnexVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgembedding,
+    postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgembedding", dims: 1536 },
   });
@@ -113,10 +117,12 @@ afterAll(async () => {
 test("Build index pgvector", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgvector,
+    postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgvector", dims: 1536 },
   });
@@ -134,10 +140,12 @@ test("Build index pgvector", async () => {
 test("MMR and Similarity Search Test pgvector", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgvector,
+    postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgvector", dims: 1536 },
   });
@@ -204,10 +212,12 @@ test("MMR and Similarity Search Test pgvector", async () => {
 test("Building WHERE query test pgvector", () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgvector,
+    postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgvector", dims: 1536 },
   });
@@ -236,8 +246,8 @@ test("Building WHERE query test pgvector", () => {
     "metadata"
   );
 
-  expect(queryMetadata).toBe(
-    `WHERE ((metadata->>'stuff')::text = 'hello' OR (metadata->>'hello')::text = 'stuff' OR ((metadata->>'hello')::text = 'stuff' AND to_tsvector('english', content) @@ plainto_tsquery('english', 'hello')))`
+  expect(JSON.stringify(queryMetadata)).toBe(
+    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
   );
 
   const queryColumn = pgVS.buildSqlFilterStr(
@@ -264,18 +274,20 @@ test("Building WHERE query test pgvector", () => {
     "column"
   );
 
-  expect(queryColumn).toBe(
-    `WHERE ((stuff) = 'hello' OR (hello) = 'stuff' OR ((hello) = 'stuff' AND to_tsvector('english', content) @@ plainto_tsquery('english', 'hello')))`
+  expect(JSON.stringify(queryColumn)).toBe(
+    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 });
 
 test("MMR and Similarity Search with filter Test pgvector", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgvector,
+    postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgvector", dims: 1536 },
   });
@@ -361,10 +373,12 @@ test("MMR and Similarity Search with filter + join Test pgvector", async () => {
 
   try {
     const pgVS = new PGVectorStore(embedding, {
-      pgDb: pgvsPgvector,
+      postgresConnectionOptions: pgvsPgvector,
       useHnswIndex: true,
       tableName: "pg_embeddings_test_join",
-      pageContentColumn: "content",
+      columns: {
+        contentColumnName: "content",
+      },
       extraColumns: [
         {
           name: "extra_stuff",
@@ -468,19 +482,21 @@ test("MMR and Similarity Search with filter + join Test pgvector", async () => {
     expect(mmrResults.length).toBe(3);
   } finally {
     // drop pg_embeddings_test_join table
-    await pgvsPgvector.none("DROP TABLE IF EXISTS pg_embeddings_test_join");
+    await pgvsPgvector.none("DROP TABLE IF EXISTS pg_embeddings_test_join;");
     // drop some extra_stuff table
-    await pgvsPgvector.none("DROP TABLE IF EXISTS some_extra_stuff");
+    await pgvsPgvector.none("DROP TABLE IF EXISTS some_extra_stuff;");
   }
 });
 
 test("Text search test pgvector", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgvector,
+    postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgvector", dims: 1536 },
   });
@@ -549,10 +565,12 @@ test("Text search test pgvector", async () => {
 test("Build index pgembedding", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgembedding,
+    postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgembedding", dims: 1536 },
   });
@@ -570,10 +588,12 @@ test("Build index pgembedding", async () => {
 test("MMR and Similarity Search Test pgembedding", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgembedding,
+    postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgembedding", dims: 1536 },
   });
@@ -640,10 +660,12 @@ test("MMR and Similarity Search Test pgembedding", async () => {
 test("Building WHERE query test pgembedding", () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgembedding,
+    postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgembedding", dims: 1536 },
   });
@@ -672,8 +694,8 @@ test("Building WHERE query test pgembedding", () => {
     "metadata"
   );
 
-  expect(queryMetadata).toBe(
-    `WHERE ((metadata->>'stuff')::text = 'hello' OR (metadata->>'hello')::text = 'stuff' OR ((metadata->>'hello')::text = 'stuff' AND to_tsvector('english', content) @@ plainto_tsquery('english', 'hello')))`
+  expect(JSON.stringify(queryMetadata)).toBe(
+    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
   );
 
   const queryColumn = pgVS.buildSqlFilterStr(
@@ -700,18 +722,20 @@ test("Building WHERE query test pgembedding", () => {
     "column"
   );
 
-  expect(queryColumn).toBe(
-    `WHERE ((stuff) = 'hello' OR (hello) = 'stuff' OR ((hello) = 'stuff' AND to_tsvector('english', content) @@ plainto_tsquery('english', 'hello')))`
+  expect(JSON.stringify(queryColumn)).toBe(
+    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 });
 
 test("MMR and Similarity Search with filter Test pgembedding", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgembedding,
+    postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgembedding", dims: 1536 },
   });
@@ -797,10 +821,12 @@ test("MMR and Similarity Search with filter + join Test pgembedding", async () =
 
   try {
     const pgVS = new PGVectorStore(embedding, {
-      pgDb: pgvsPgembedding,
+      postgresConnectionOptions: pgvsPgembedding,
       useHnswIndex: true,
       tableName: "pg_embeddings_test_join",
-      pageContentColumn: "content",
+      columns: {
+        contentColumnName: "content",
+      },
       extraColumns: [
         {
           name: "extra_stuff",
@@ -904,19 +930,21 @@ test("MMR and Similarity Search with filter + join Test pgembedding", async () =
     expect(mmrResults.length).toBe(3);
   } finally {
     // drop pg_embeddings_test_join table
-    await pgvsPgvector.none("DROP TABLE IF EXISTS pg_embeddings_test_join");
+    await pgvsPgvector.none("DROP TABLE IF EXISTS pg_embeddings_test_join;");
     // drop some extra_stuff table
-    await pgvsPgvector.none("DROP TABLE IF EXISTS some_extra_stuff");
+    await pgvsPgvector.none("DROP TABLE IF EXISTS some_extra_stuff;");
   }
 });
 
 test("Text search test pgembedding", async () => {
   const embedding = new OpenAIEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
-    pgDb: pgvsPgembedding,
+    postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
     tableName: "pg_embeddings",
-    pageContentColumn: "content",
+    columns: {
+      contentColumnName: "content",
+    },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
     pgExtensionOpts: { type: "pgembedding", dims: 1536 },
   });

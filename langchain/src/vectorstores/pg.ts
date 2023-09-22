@@ -1,9 +1,61 @@
+/* eslint-disable no-loop-func */
 import pgPromise, { IDatabase, ITask } from "pg-promise";
 import { MaxMarginalRelevanceSearchOptions, VectorStore } from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 import { maximalMarginalRelevance } from "../util/math.js";
 import { isFloat, isInt, isString } from "../util/types.js";
+
+class Fragment {
+  constructor(
+    public readonly query: string,
+    public readonly values?: unknown[]
+  ) {}
+}
+
+function combineFragments(
+  fragments: (Fragment | string | null)[],
+  joiner: string = " ",
+  enclosed: boolean = false
+): Fragment {
+  const queryArray = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let combinedValues: any[] = [];
+  let placeholderOffset = 0;
+
+  for (const fragment of fragments) {
+    if (fragment == null) continue;
+    // eslint-disable-next-line no-instanceof/no-instanceof
+    if (fragment instanceof Fragment) {
+      if (!fragment.query || fragment.query.length === 0) continue;
+      let reparametrizedQuery = fragment.query;
+
+      if (fragment.values && fragment.values.length > 0) {
+        reparametrizedQuery = fragment.query.replace(
+          /\$(\d+)/g,
+          (_, n) => `$${parseInt(n, 10) + placeholderOffset}`
+        );
+        
+        combinedValues = combinedValues.concat(fragment.values);
+        placeholderOffset += fragment.values.length;
+      }
+
+      queryArray.push(reparametrizedQuery);
+    } else {
+      if (!fragment || fragment.length === 0) continue;
+      queryArray.push(fragment);
+    }
+  }
+
+  const newQuery = `${enclosed ? "(" : ""}${queryArray.join(joiner).trim()}${
+    enclosed ? ")" : ""
+  }`;
+
+  return new Fragment(
+    newQuery,
+    combinedValues.length > 0 ? combinedValues : undefined
+  );
+}
 
 export type FilterValue = string | number;
 
@@ -191,10 +243,11 @@ export abstract class PostgresEmbeddingExtension<
    */
   abstract buildFetchRowsStatement(
     vector: number[],
+    vectorColumnName: string,
     tableName: string,
     returns: string[],
     disambiguate?: boolean
-  ): string;
+  ): Fragment;
 
   /**
    * Build the SQL statement to ensure the extension is installed in the
@@ -212,7 +265,7 @@ export abstract class PostgresEmbeddingExtension<
    * Build the SQL statement to insert a vector into the database.
    * @param vector - The vector to insert into the database.
    */
-  abstract buildInsertionVector(vector: number[]): string;
+  abstract buildInsertVectorStatement(vector: number[]): string;
 
   /**
    * Build the SQL statement to create an HNSW index on the embedding column.
@@ -244,10 +297,11 @@ export class PGEmbeddingExt<
 
   buildFetchRowsStatement(
     vector: number[],
+    vectorColumnName: string,
     tableName: string,
     returns: string[],
     disambiguate?: boolean
-  ): string {
+  ): Fragment {
     let arrow;
     switch (this.selectedMetric) {
       case "cosine":
@@ -272,8 +326,8 @@ export class PGEmbeddingExt<
       selectStatement = returns.length > 0 ? returns.join(", ") : "*";
     }
 
-    return pgp.as.format(
-      `SELECT ${selectStatement}, embedding ${arrow} $1:raw AS "_distance" FROM ${tableName}`,
+    return new Fragment(
+      `SELECT ${selectStatement}, ${vectorColumnName} ${arrow} $1:raw AS "_distance" FROM ${tableName}`,
       [`array[${vector.join(",")}]`]
     );
   }
@@ -286,7 +340,7 @@ export class PGEmbeddingExt<
     return "REAL[]";
   }
 
-  buildInsertionVector(vector: number[]): string {
+  buildInsertVectorStatement(vector: number[]): string {
     return `{${vector.join(",")}}`;
   }
 
@@ -352,20 +406,21 @@ export class PGVectorExt<
 
   buildFetchRowsStatement(
     vector: number[],
+    vectorColumnName: string,
     tableName: string,
     returns: string[],
     disambiguate?: boolean
-  ): string {
+  ): Fragment {
     let embeddingStatement;
     switch (this.selectedMetric) {
       case "cosine":
-        embeddingStatement = "1 - (embedding <=> $1::vector)";
+        embeddingStatement = `1 - (${vectorColumnName} <=> $1::vector)`;
         break;
       case "l2":
-        embeddingStatement = "embedding <-> $1::vector";
+        embeddingStatement = `${vectorColumnName} <-> $1::vector`;
         break;
       case "inner_product":
-        embeddingStatement = "(embedding <#> $1::vector) * -1";
+        embeddingStatement = `(${vectorColumnName} <#> $1::vector) * -1`;
         break;
       default:
         throw new Error("Invalid metric");
@@ -380,7 +435,7 @@ export class PGVectorExt<
       selectStatement = returns.length > 0 ? returns.join(", ") : "*";
     }
     const queryStr = `[${vector.join(",")}]`;
-    return pgp.as.format(
+    return new Fragment(
       `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM ${tableName}`,
       [queryStr]
     );
@@ -394,7 +449,7 @@ export class PGVectorExt<
     return `vector(${this.dims})`;
   }
 
-  buildInsertionVector(vector: number[]): string {
+  buildInsertVectorStatement(vector: number[]): string {
     return `[${vector.join(",")}]`;
   }
 
@@ -430,7 +485,7 @@ export class PGVectorExt<
       default:
         throw new Error("Invalid metric");
     }
-    return `CREATE INDEX ${indexName} ON ${tableName} USING hnsw(${columnName}${ops})${
+    return `CREATE INDEX IF NOT EXISTS ${indexName} ON ${tableName} USING hnsw(${columnName}${ops})${
       opts.length > 0 ? ` WITH (${opts.join(", ")})` : ""
     };${efSearchStr}`;
   }
@@ -442,17 +497,6 @@ export class PGVectorExt<
     return query(dbInstance);
   }
 }
-
-/**
- * A search result returned by the PGVectorStore.
- */
-export type SearchResult = {
-  pageContent: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  metadata: Record<string, any>;
-  embedding: number[];
-  _distance: number;
-};
 
 /**
  * A column in the database. Used for extra columns.
@@ -473,14 +517,22 @@ export type Column = {
 export interface PGVectorStoreArgs<
   T extends Record<string, unknown> = Record<string, unknown>
 > {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pgDb: IDatabase<TableShape<T>> | Record<string, any> | string;
+  postgresConnectionOptions:
+    | IDatabase<TableShape<T>>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    | Record<string, any>
+    | string;
   useHnswIndex: boolean;
   tableName?: string;
-  pageContentColumn?: string;
   pgExtensionOpts?:
     | { type: "pgvector" | "pgembedding"; dims?: number; metric?: Metric }
     | PostgresEmbeddingExtension;
+  columns?: {
+    idColumnName?: string;
+    vectorColumnName?: string;
+    contentColumnName?: string;
+    metadataColumnName?: string;
+  };
   extraColumns?: Column[];
 }
 
@@ -494,13 +546,19 @@ function isIDatabase(obj: any): obj is IDatabase<any> {
 export class PGVectorStore<
   T extends Record<string, unknown> = Record<string, unknown>
 > extends VectorStore {
-  declare FilterType: PGFilterWithJoin;
+  declare FilterType: PGFilterWithJoin | Record<string, unknown>;
 
   pgInstance: IDatabase<TableShape<T>>;
 
   tableName: string;
 
-  pageContentColumn: string;
+  pageContentColumnName: string;
+
+  vectorColumnName: string;
+
+  metadataColumnName: string;
+
+  idColumnName: string;
 
   pgExtension: PostgresEmbeddingExtension;
 
@@ -513,17 +571,27 @@ export class PGVectorStore<
     this.embeddings = embeddings;
     this.useHnswIndex = args.useHnswIndex;
     this.tableName = args.tableName ?? "documents";
-    this.pageContentColumn = args.pageContentColumn ?? "content";
+
+    this.pageContentColumnName = args.columns?.contentColumnName ?? "content";
+    this.vectorColumnName = args.columns?.vectorColumnName ?? "embedding";
+    this.idColumnName = args.columns?.idColumnName ?? "id";
+    this.metadataColumnName = args.columns?.metadataColumnName ?? "metadata";
+
     this.extraColumns = args.extraColumns ?? [];
 
     if (
-      typeof args.pgDb === "string" ||
-      (typeof args.pgDb === "object" &&
-        ("host" in args.pgDb || "database" in args.pgDb))
+      typeof args.postgresConnectionOptions === "string" ||
+      (typeof args.postgresConnectionOptions === "object" &&
+        ("host" in args.postgresConnectionOptions ||
+          "database" in args.postgresConnectionOptions))
     ) {
-      this.pgInstance = pgp(args.pgDb) as IDatabase<TableShape<T>>;
-    } else if (isIDatabase(args.pgDb)) {
-      this.pgInstance = args.pgDb as IDatabase<TableShape<T>>;
+      this.pgInstance = pgp(args.postgresConnectionOptions) as IDatabase<
+        TableShape<T>
+      >;
+    } else if (isIDatabase(args.postgresConnectionOptions)) {
+      this.pgInstance = args.postgresConnectionOptions as IDatabase<
+        TableShape<T>
+      >;
     } else {
       throw new Error("Invalid pg-promise argument");
     }
@@ -557,7 +625,7 @@ export class PGVectorStore<
   }
 
   _vectorstoreType(): string {
-    return "PG";
+    return "pg";
   }
 
   /**
@@ -584,35 +652,46 @@ export class PGVectorStore<
     }
   ): Promise<void> {
     await this.ensureTableInDatabase();
-    const rows = vectors.map((embedding, idx) => {
-      const extraColumns = Object.entries(
-        options?.extraColumns[idx] ?? {}
-      ).reduce((acc, [key, value]) => {
-        // check if key is in this.extraColumns
-        const column = this.extraColumns.find(({ name }) => name === key);
-        if (column == null) return acc;
 
-        acc[key] = value;
-        return acc;
-      }, {} as ColumnValue);
+    const chunkSize = 1000;
+    for (let i = 0; i < vectors.length; i += chunkSize) {
+      const chunkVectors = vectors.slice(i, i + chunkSize);
+      const chunkDocuments = documents.slice(i, i + chunkSize);
+      const chunkExtraColumns =
+        options?.extraColumns?.slice(i, i + chunkSize) || [];
 
-      const embeddingString = this.pgExtension.buildInsertionVector(embedding);
-      const documentRow = {
-        [this.pageContentColumn]: documents[idx].pageContent,
-        embedding: embeddingString,
-        metadata: documents[idx].metadata,
-        ...extraColumns,
-      };
+      const rows = chunkVectors.map((embedding, idx) => {
+        const extraColumns = Object.entries(
+          chunkExtraColumns[idx] ?? {}
+        ).reduce((acc, [key, value]) => {
+          // check if key is in this.extraColumns
+          const column = this.extraColumns.find(({ name }) => name === key);
+          if (column == null) return acc;
 
-      return documentRow;
-    });
-    await this.runQuery((database) => {
-      const columnSet = new pgp.helpers.ColumnSet(Object.keys(rows[0]), {
-        table: this.tableName,
+          acc[key] = value;
+          return acc;
+        }, {} as ColumnValue);
+
+        const embeddingString =
+          this.pgExtension.buildInsertVectorStatement(embedding);
+        const documentRow = {
+          [this.pageContentColumnName]: chunkDocuments[idx].pageContent,
+          [this.vectorColumnName]: embeddingString,
+          [this.metadataColumnName]: chunkDocuments[idx].metadata,
+          ...extraColumns,
+        };
+
+        return documentRow;
       });
-      const insertQuery = pgp.helpers.insert(rows, columnSet);
-      return database.none(insertQuery);
-    });
+
+      await this.runQuery((database) => {
+        const columnSet = new pgp.helpers.ColumnSet(Object.keys(rows[0]), {
+          table: this.tableName,
+        });
+        const insertQuery = pgp.helpers.insert(rows, columnSet);
+        return database.none(insertQuery);
+      });
+    }
   }
 
   async addDocuments(
@@ -637,10 +716,10 @@ export class PGVectorStore<
     await this.pgInstance.none('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
 
     const columns = [
-      "id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
-      `${this.pageContentColumn} text`,
-      "metadata jsonb",
-      `embedding ${this.pgExtension.buildDataType()}`,
+      `${this.idColumnName} uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY`,
+      `${this.pageContentColumnName} text`,
+      `${this.metadataColumnName} jsonb`,
+      `${this.vectorColumnName} ${this.pgExtension.buildDataType()}`,
     ];
 
     const extraColumns = this.extraColumns.map(
@@ -690,36 +769,59 @@ export class PGVectorStore<
     return `${op} ${table} ON ${onConditions}`;
   }
 
-  private async fetchRows(
+  async fetchRows(
     query: number[],
     k: number,
-    filter?: this["FilterType"] | undefined,
+    filter?: this["FilterType"],
     returnedColumns?: string[]
-  ): Promise<SearchResult[]> {
-    const { metadataFilter, columnFilter, join: joinStatement } = filter ?? {};
+  ) {
+    let filterStatement: Fragment | null = null;
     let shouldDisambiguate = false;
-    if (joinStatement) {
-      shouldDisambiguate = true;
-    }
-    let filterType: "metadata" | "column" | undefined;
+    if (filter) {
+      if ("metadataFilter" in filter || "columnFilter" in filter) {
+        const metadataFilter = filter.metadataFilter as PGFilter | undefined;
+        const columnFilter = filter.columnFilter as PGFilter | undefined;
+        let filterType: "metadata" | "column" | undefined;
 
-    let joinStatements: string[];
-    if (Array.isArray(joinStatement)) {
-      joinStatements = joinStatement.map((statement) =>
-        this.buildJoinStatement(statement)
-      );
-    } else {
-      joinStatements = joinStatement
-        ? [this.buildJoinStatement(joinStatement)]
-        : [];
+        if (metadataFilter && columnFilter) {
+          throw new Error("Cannot have both metadataFilter and columnFilter");
+        } else if (metadataFilter) {
+          filterType = "metadata";
+        } else if (columnFilter) {
+          filterType = "column";
+        }
+        const combinedFilters = this.buildSqlFilterStr(
+          metadataFilter ?? columnFilter,
+          filterType
+        );
+        if (combinedFilters) {
+          filterStatement = combineFragments(combinedFilters);
+        }
+      } else {
+        filterStatement = new Fragment(`WHERE ${this.vectorColumnName} @> $1`, [
+          filter,
+        ]);
+      }
     }
 
-    if (metadataFilter && columnFilter) {
-      throw new Error("Cannot have both metadataFilter and columnFilter");
-    } else if (metadataFilter) {
-      filterType = "metadata";
-    } else if (columnFilter) {
-      filterType = "column";
+    let joinStatements: string[] = [];
+    if (filter && "join" in filter) {
+      const joinStatement = filter.join as
+        | JoinStatement
+        | JoinStatement[]
+        | undefined;
+      if (Array.isArray(joinStatement)) {
+        joinStatements = joinStatement.map((statement) =>
+          this.buildJoinStatement(statement)
+        );
+      } else {
+        joinStatements = joinStatement
+          ? [this.buildJoinStatement(joinStatement)]
+          : [];
+      }
+      if (joinStatements.length > 0) {
+        shouldDisambiguate = true;
+      }
     }
 
     const selectedColumns = [
@@ -728,28 +830,38 @@ export class PGVectorStore<
         .filter(({ returned }) => returned)
         .map(({ name }) => name),
     ];
-    const queryStr = [
+    const queryFrags = [
       this.pgExtension.buildFetchRowsStatement(
         query,
+        this.vectorColumnName,
         this.tableName,
-        ["id", this.pageContentColumn, "metadata", ...selectedColumns],
+        [
+          this.idColumnName,
+          this.pageContentColumnName,
+          this.metadataColumnName,
+          ...selectedColumns,
+        ],
         shouldDisambiguate
       ),
       ...joinStatements,
-      this.buildSqlFilterStr(metadataFilter ?? columnFilter, filterType),
-      pgp.as.format(`ORDER BY "_distance" LIMIT $1;`, [k]),
-    ]
-      .filter((x) => x != null && x !== "")
-      .join(" ");
+      filterStatement,
+      new Fragment(`ORDER BY "_distance" LIMIT $1;`, [k]),
+    ];
 
-    const results = await this.runQuery((database) => database.any(queryStr));
+    const combinedFrags = combineFragments(queryFrags);
 
-    if (results && results.length > 0 && "embedding" in results[0]) {
+    const results = await this.runQuery((database) =>
+      database.any(combinedFrags.query, combinedFrags.values)
+    );
+
+    if (results && results.length > 0 && this.vectorColumnName in results[0]) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       results.forEach((_: any, idx: number) => {
-        if (typeof results[idx].embedding === "string") {
+        if (typeof results[idx][this.vectorColumnName] === "string") {
           try {
-            results[idx].embedding = JSON.parse(results[idx].embedding);
+            results[idx][this.vectorColumnName] = JSON.parse(
+              results[idx][this.vectorColumnName]
+            );
           } catch (error) {
             throw new Error("Error parsing embedding");
           }
@@ -757,7 +869,7 @@ export class PGVectorStore<
       });
     }
 
-    return results as SearchResult[];
+    return results;
   }
 
   async similaritySearchVectorWithScore(
@@ -769,8 +881,9 @@ export class PGVectorStore<
     const rows = await this.fetchRows(query, k, filter);
     return rows.map((row) => [
       new Document({
-        pageContent: row[this.pageContentColumn as keyof typeof row] as string,
-        metadata: row.metadata,
+        pageContent: row[this.pageContentColumnName] as string,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        metadata: row[this.metadataColumnName] as Record<string, any>,
       }),
       row._distance,
     ]);
@@ -783,10 +896,10 @@ export class PGVectorStore<
     const { k, fetchK = 20, lambda = 0.7, filter } = options;
     const queryEmbedding = await this.embeddings.embedQuery(query);
     const results = await this.fetchRows(queryEmbedding, fetchK, filter, [
-      "embedding",
+      this.vectorColumnName,
     ]);
 
-    const embeddings = results.map((result) => result.embedding);
+    const embeddings = results.map((result) => result[this.vectorColumnName]);
     const mmrIndexes = maximalMarginalRelevance(
       queryEmbedding,
       embeddings,
@@ -798,8 +911,9 @@ export class PGVectorStore<
       .map((idx) => {
         const result = results[idx];
         return new Document({
-          pageContent: result.pageContent,
-          metadata: result.metadata,
+          pageContent: result[this.pageContentColumnName] as string,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          metadata: result[this.metadataColumnName] as Record<string, any>,
         });
       });
   }
@@ -827,7 +941,7 @@ export class PGVectorStore<
       this.pgExtension.buildHNSWIndexStatement(
         indexName,
         this.tableName,
-        "embedding",
+        this.vectorColumnName,
         {
           m,
           efConstruction,
@@ -862,7 +976,9 @@ export class PGVectorStore<
       }
     }
 
-    return pgp.as.format(`to_tsvector($1, ${column}) @@ ${queryOp}($1, $2)`, [
+    return new Fragment(`to_tsvector($1, $2:name) @@ ${queryOp}($3, $4)`, [
+      lang,
+      column,
       lang,
       query,
     ]);
@@ -883,7 +999,7 @@ export class PGVectorStore<
       key: string,
       operator: ComparisonMapKey,
       value: string | number | TextSearchValue
-    ): string => {
+    ): Fragment => {
       const op = operator;
       const compRaw = ComparisonMap[op];
       const myValue =
@@ -905,14 +1021,14 @@ export class PGVectorStore<
         throw new Error("Data type not supported");
       }
       let columnKey;
-      if (key === this.pageContentColumn) {
-        columnKey = this.pageContentColumn;
+      if (key === this.pageContentColumnName) {
+        columnKey = this.pageContentColumnName;
       } else {
         if (type === "column") {
           columnKey = `${key}`;
           typeCast = "";
         } else {
-          columnKey = `metadata${arrow}'${key}'`;
+          columnKey = `${this.metadataColumnName}${arrow}'${key}'`;
         }
       }
 
@@ -922,7 +1038,7 @@ export class PGVectorStore<
           columnKey
         );
       } else {
-        return pgp.as.format(`($1:raw)${typeCast} ${compRaw} $2`, [
+        return new Fragment(`($1:raw)${typeCast} ${compRaw} $2`, [
           columnKey,
           myValue,
         ]);
@@ -930,34 +1046,49 @@ export class PGVectorStore<
     };
     const allowedOps = Object.keys(LogicalMap);
 
-    const recursiveBuild = (filterObj: PGFilter): string =>
-      Object.entries(filterObj)
-        .map(([key, ops]) => {
-          if (allowedOps.includes(key)) {
-            const logicalParts = (ops as PGFilter[]).map(recursiveBuild);
-            const separator = LogicalMap[key as LogicalMapKey];
-            return `(${logicalParts.join(` ${separator} `)})`;
-          }
+    const recursiveBuild = (filterObj: PGFilter): Fragment[] => {
+      const fragmentList: Fragment[] = [];
 
-          if (typeof ops === "object" && !Array.isArray(ops)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return Object.entries(ops as Record<string, any>)
-              .map(([opName, value]) => {
-                if (!value) return null;
-                return buildClause(key, opName as ComparisonMapKey, value);
-              })
-              .filter(Boolean)
-              .join(" AND ");
-          }
+      Object.entries(filterObj).forEach(([key, ops]) => {
+        if (allowedOps.includes(key)) {
+          const logicalParts = (ops as PGFilter[]).flatMap(recursiveBuild);
+          const separator = LogicalMap[key as LogicalMapKey];
+          const combinedQuery = combineFragments(
+            logicalParts,
+            ` ${separator} `,
+            true
+          );
+          fragmentList.push(combinedQuery);
+          return;
+        }
 
-          return buildClause(key, "$eq", ops);
-        })
-        .filter(Boolean)
-        .join(" AND ");
+        if (typeof ops === "object" && !Array.isArray(ops)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          Object.entries(ops as Record<string, any>).forEach(
+            ([opName, value]) => {
+              if (value) {
+                const clause = buildClause(
+                  key,
+                  opName as ComparisonMapKey,
+                  value
+                );
+                fragmentList.push(clause);
+              }
+            }
+          );
+          return;
+        }
 
-    const strFilter = `WHERE ${recursiveBuild(filter)}`;
+        const clause = buildClause(key, "$eq", ops);
+        fragmentList.push(clause);
+      });
 
-    if (strFilter === "WHERE ") return null;
-    return strFilter;
+      return fragmentList;
+    };
+
+    const built = combineFragments(recursiveBuild(filter), ` AND `, true);
+
+    if (built.query.length === 0) return null;
+    return ["WHERE", built];
   }
 }
