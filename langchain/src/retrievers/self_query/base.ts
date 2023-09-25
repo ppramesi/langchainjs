@@ -13,7 +13,8 @@ import {
   VisitorStructuredQueryResult,
 } from "../../chains/query_constructor/ir.js";
 import { VectorStore } from "../../vectorstores/base.js";
-import { isFilterEmpty, castValue } from "./utils.js";
+import { isFilterEmpty } from "./utils.js";
+import { castValue } from "../../util/type_utils.js";
 
 /**
  * Options object for the BasicTranslator class. Specifies the allowed

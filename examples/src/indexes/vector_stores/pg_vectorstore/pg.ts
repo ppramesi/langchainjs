@@ -141,7 +141,7 @@ export async function run() {
        * by setting pageContentColumn when defining it in KnexVectorStoreArgs.
        *
        * Note: the name of the column can be a vector for SQL injection attacks since the name
-       * of the column is injected straight raw into the SQL query without sanitazing. So make
+       * of the column is injected straight raw into the SQL query without sanitizing. So make
        * sure to not let users define the name of the column from the client side.
        */
       content: {

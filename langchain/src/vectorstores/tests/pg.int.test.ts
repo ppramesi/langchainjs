@@ -247,7 +247,7 @@ test("Building WHERE query test pgvector", () => {
   );
 
   expect(JSON.stringify(queryMetadata)).toBe(
-    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
   );
 
   const queryColumn = pgVS.buildSqlFilterStr(
@@ -275,7 +275,7 @@ test("Building WHERE query test pgvector", () => {
   );
 
   expect(JSON.stringify(queryColumn)).toBe(
-    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 });
 
@@ -695,7 +695,7 @@ test("Building WHERE query test pgembedding", () => {
   );
 
   expect(JSON.stringify(queryMetadata)).toBe(
-    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
   );
 
   const queryColumn = pgVS.buildSqlFilterStr(
@@ -723,7 +723,7 @@ test("Building WHERE query test pgembedding", () => {
   );
 
   expect(JSON.stringify(queryColumn)).toBe(
-    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:name) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 });
 

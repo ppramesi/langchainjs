@@ -4,7 +4,7 @@ import { MaxMarginalRelevanceSearchOptions, VectorStore } from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
 import { maximalMarginalRelevance } from "../util/math.js";
-import { isFloat, isInt, isString } from "../util/types.js";
+import { isFloat, isInt, isString } from "../util/type_utils.js";
 
 class Fragment {
   constructor(
@@ -35,7 +35,7 @@ function combineFragments(
           /\$(\d+)/g,
           (_, n) => `$${parseInt(n, 10) + placeholderOffset}`
         );
-        
+
         combinedValues = combinedValues.concat(fragment.values);
         placeholderOffset += fragment.values.length;
       }
@@ -327,8 +327,8 @@ export class PGEmbeddingExt<
     }
 
     return new Fragment(
-      `SELECT ${selectStatement}, ${vectorColumnName} ${arrow} $1:raw AS "_distance" FROM ${tableName}`,
-      [`array[${vector.join(",")}]`]
+      `SELECT ${selectStatement}, $1:name ${arrow} $2:value AS "_distance" FROM $3:name`,
+      [vectorColumnName, `array[${vector.join(",")}]`, tableName]
     );
   }
 
@@ -414,13 +414,13 @@ export class PGVectorExt<
     let embeddingStatement;
     switch (this.selectedMetric) {
       case "cosine":
-        embeddingStatement = `1 - (${vectorColumnName} <=> $1::vector)`;
+        embeddingStatement = `1 - ($1:name <=> $2::vector)`;
         break;
       case "l2":
-        embeddingStatement = `${vectorColumnName} <-> $1::vector`;
+        embeddingStatement = `$1:name <-> $2::vector`;
         break;
       case "inner_product":
-        embeddingStatement = `(${vectorColumnName} <#> $1::vector) * -1`;
+        embeddingStatement = `($1:name <#> $2::vector) * -1`;
         break;
       default:
         throw new Error("Invalid metric");
@@ -436,8 +436,8 @@ export class PGVectorExt<
     }
     const queryStr = `[${vector.join(",")}]`;
     return new Fragment(
-      `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM ${tableName}`,
-      [queryStr]
+      `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM $3:name`,
+      [vectorColumnName, queryStr, tableName]
     );
   }
 
@@ -550,22 +550,22 @@ export class PGVectorStore<
 
   pgInstance: IDatabase<TableShape<T>>;
 
-  tableName: string;
-
-  pageContentColumnName: string;
-
-  vectorColumnName: string;
-
-  metadataColumnName: string;
-
-  idColumnName: string;
-
   pgExtension: PostgresEmbeddingExtension;
-
-  extraColumns: Column[];
-
+  
   useHnswIndex: boolean;
+  
+  private extraColumns: Column[];
 
+  private tableName: string;
+
+  private pageContentColumnName: string;
+
+  private vectorColumnName: string;
+
+  private metadataColumnName: string;
+
+  private idColumnName: string;
+  
   constructor(embeddings: Embeddings, args: PGVectorStoreArgs) {
     super(embeddings, args);
     this.embeddings = embeddings;
@@ -744,7 +744,7 @@ export class PGVectorStore<
     `);
   }
 
-  private buildJoinStatement(statement: JoinStatement): string {
+  private buildJoinStatement(statement: JoinStatement): Fragment {
     const { op, table, on } = statement;
     if (
       ![
@@ -759,17 +759,18 @@ export class PGVectorStore<
       throw new Error(`Invalid join statement: ${op}`);
     }
 
-    const onConditions = on
-      .map(
-        (condition) =>
-          `${condition.left} ${condition.operator || "="} ${condition.right}`
-      )
-      .join(" AND ");
+    const parametrizedOn = [];
+    const onParams = [];
+    for(let k = 0; k < on.length; k += 2){
+      parametrizedOn.push(`$${k + 2}:alias ${on[k].operator || "="} $${k + 3}:alias`);
+      onParams.push(on[k].left);
+      onParams.push(on[k].right);
+    }
 
-    return `${op} ${table} ON ${onConditions}`;
+    return new Fragment(`${op} $1:name on ${parametrizedOn.join(" AND ")}`, [table, ...onParams]);
   }
 
-  async fetchRows(
+  private async fetchRows(
     query: number[],
     k: number,
     filter?: this["FilterType"],
@@ -798,13 +799,14 @@ export class PGVectorStore<
           filterStatement = combineFragments(combinedFilters);
         }
       } else {
-        filterStatement = new Fragment(`WHERE ${this.vectorColumnName} @> $1`, [
+        filterStatement = new Fragment(`WHERE $1:name @> $2`, [
+          this.vectorColumnName,
           filter,
         ]);
       }
     }
 
-    let joinStatements: string[] = [];
+    let joinStatements: Fragment[] = [];
     if (filter && "join" in filter) {
       const joinStatement = filter.join as
         | JoinStatement
@@ -976,7 +978,7 @@ export class PGVectorStore<
       }
     }
 
-    return new Fragment(`to_tsvector($1, $2:name) @@ ${queryOp}($3, $4)`, [
+    return new Fragment(`to_tsvector($1, $2:raw) @@ ${queryOp}($3, $4)`, [
       lang,
       column,
       lang,

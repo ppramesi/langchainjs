@@ -1,6 +1,6 @@
 /* eslint-disable no-process-env */
 import { test } from "@jest/globals";
-import { castValue, isFloat, isInt, isString } from "../utils.js";
+import { castValue, isFloat, isInt, isString } from "../../../util/type_utils.js";
 
 test("Casting values correctly", () => {
   const stringString = [
