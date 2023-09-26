@@ -15,8 +15,8 @@ class Fragment {
 
 function combineFragments(
   fragments: (Fragment | string | null)[],
-  joiner: string = " ",
-  enclosed: boolean = false
+  joiner = " ",
+  enclosed = false
 ): Fragment {
   const queryArray = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,6 +70,8 @@ export type TextSearchValue = {
   config?: string;
 };
 
+const allowedOperators = ["=", "<>", ">", ">=", "<", "<="] as const;
+
 export type OnCondition = {
   left: string;
   right: string;
@@ -108,11 +110,11 @@ export type PGFilter = KeyValueFilter | LogicalOperator;
 export type PGFilterWithJoin =
   | {
       metadataFilter?: never;
-      columnFilter?: PGFilter;
+      columnFilter: PGFilter;
       join?: JoinStatement | JoinStatement[];
     }
   | {
-      metadataFilter?: PGFilter;
+      metadataFilter: PGFilter;
       columnFilter?: never;
       join?: JoinStatement | JoinStatement[];
     };
@@ -380,7 +382,7 @@ export class PGEmbeddingExt<
 
   /**
    * For some reason, pgembedding requires you to set enable_seqscan to off
-   * when using it with hnsw indexes. This function wraps the query with a
+   * when using its with hnsw indexes. This function wraps the query with a
    * transaction that sets enable_seqscan to off.
    * @param PGInstance
    * @param query
@@ -551,9 +553,9 @@ export class PGVectorStore<
   pgInstance: IDatabase<TableShape<T>>;
 
   pgExtension: PostgresEmbeddingExtension;
-  
+
   useHnswIndex: boolean;
-  
+
   private extraColumns: Column[];
 
   private tableName: string;
@@ -565,7 +567,7 @@ export class PGVectorStore<
   private metadataColumnName: string;
 
   private idColumnName: string;
-  
+
   constructor(embeddings: Embeddings, args: PGVectorStoreArgs) {
     super(embeddings, args);
     this.embeddings = embeddings;
@@ -761,13 +763,22 @@ export class PGVectorStore<
 
     const parametrizedOn = [];
     const onParams = [];
-    for(let k = 0; k < on.length; k += 2){
-      parametrizedOn.push(`$${k + 2}:alias ${on[k].operator || "="} $${k + 3}:alias`);
+    for (let k = 0; k < on.length; k += 2) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      if (on[k].operator && !allowedOperators.includes(on[k].operator!)) {
+        throw new Error(`Invalid operator: ${on[k].operator}`);
+      }
+      parametrizedOn.push(
+        `$${k + 2}:alias ${on[k].operator || "="} $${k + 3}:alias`
+      );
       onParams.push(on[k].left);
       onParams.push(on[k].right);
     }
 
-    return new Fragment(`${op} $1:name on ${parametrizedOn.join(" AND ")}`, [table, ...onParams]);
+    return new Fragment(`${op} $1:name ON ${parametrizedOn.join(" AND ")}`, [
+      table,
+      ...onParams,
+    ]);
   }
 
   private async fetchRows(
@@ -778,8 +789,12 @@ export class PGVectorStore<
   ) {
     let filterStatement: Fragment | null = null;
     let shouldDisambiguate = false;
+
+    let joinStatements: Fragment[] = [];
+
     if (filter) {
-      if ("metadataFilter" in filter || "columnFilter" in filter) {
+      const { metadataFilter, columnFilter, join, ...rest } = filter;
+      if (metadataFilter || columnFilter) {
         const metadataFilter = filter.metadataFilter as PGFilter | undefined;
         const columnFilter = filter.columnFilter as PGFilter | undefined;
         let filterType: "metadata" | "column" | undefined;
@@ -798,31 +813,30 @@ export class PGVectorStore<
         if (combinedFilters) {
           filterStatement = combineFragments(combinedFilters);
         }
-      } else {
+      } else if (rest && Object.keys(rest).length > 0) {
         filterStatement = new Fragment(`WHERE $1:name @> $2`, [
           this.vectorColumnName,
-          filter,
+          rest,
         ]);
       }
-    }
 
-    let joinStatements: Fragment[] = [];
-    if (filter && "join" in filter) {
-      const joinStatement = filter.join as
-        | JoinStatement
-        | JoinStatement[]
-        | undefined;
-      if (Array.isArray(joinStatement)) {
-        joinStatements = joinStatement.map((statement) =>
-          this.buildJoinStatement(statement)
-        );
-      } else {
-        joinStatements = joinStatement
-          ? [this.buildJoinStatement(joinStatement)]
-          : [];
-      }
-      if (joinStatements.length > 0) {
-        shouldDisambiguate = true;
+      if (join) {
+        const joinStatement = filter.join as
+          | JoinStatement
+          | JoinStatement[]
+          | undefined;
+        if (Array.isArray(joinStatement)) {
+          joinStatements = joinStatement.map((statement) =>
+            this.buildJoinStatement(statement)
+          );
+        } else {
+          joinStatements = joinStatement
+            ? [this.buildJoinStatement(joinStatement)]
+            : [];
+        }
+        if (joinStatements.length > 0) {
+          shouldDisambiguate = true;
+        }
       }
     }
 
@@ -958,7 +972,11 @@ export class PGVectorStore<
     await this.pgInstance.none(`DROP INDEX IF EXISTS ${indexName};`);
   }
 
-  buildTextSearchStatement(param: TextSearchValue, column: string) {
+  buildTextSearchStatement(
+    key: string,
+    param: TextSearchValue,
+    column: string
+  ) {
     const { query, type, config } = param;
     const lang = `${config ?? "simple"}`;
     let queryOp = "to_tsquery";
@@ -978,12 +996,43 @@ export class PGVectorStore<
       }
     }
 
-    return new Fragment(`to_tsvector($1, $2:raw) @@ ${queryOp}($3, $4)`, [
+    return new Fragment(`to_tsvector($1, ${column}) @@ ${queryOp}($3, $4)`, [
       lang,
-      column,
+      key,
       lang,
       query,
     ]);
+  }
+
+  private buildColumnStatement(
+    value: string | number,
+    type: string,
+    index: number
+  ) {
+    let columnStatement;
+    let typeCast: string;
+    let arrow = "";
+
+    if (isString(value)) {
+      typeCast = "::text";
+      arrow = "->>";
+    } else if (isInt(value)) {
+      typeCast = "::int";
+      arrow = "->";
+    } else if (isFloat(value)) {
+      typeCast = "::float";
+      arrow = "->";
+    } else {
+      throw new Error("Data type not supported");
+    }
+
+    if (type === "column") {
+      columnStatement = `$${index}:alias`;
+    } else {
+      columnStatement = `(${this.metadataColumnName}${arrow}$${index})${typeCast}`;
+    }
+
+    return columnStatement;
   }
 
   /**
@@ -1007,43 +1056,16 @@ export class PGVectorStore<
       const myValue =
         typeof value === "object" && "query" in value ? value.query : value;
 
-      let typeCast;
-      let arrow;
-
-      if (isString(myValue)) {
-        typeCast = "::text";
-        arrow = "->>";
-      } else if (isInt(myValue)) {
-        typeCast = "::int";
-        arrow = "->";
-      } else if (isFloat(myValue)) {
-        typeCast = "::float";
-        arrow = "->";
-      } else {
-        throw new Error("Data type not supported");
-      }
-      let columnKey;
-      if (key === this.pageContentColumnName) {
-        columnKey = this.pageContentColumnName;
-      } else {
-        if (type === "column") {
-          columnKey = `${key}`;
-          typeCast = "";
-        } else {
-          columnKey = `${this.metadataColumnName}${arrow}'${key}'`;
-        }
-      }
-
       if (op === "$textSearch") {
+        const columnStatement = this.buildColumnStatement(myValue, type, 2);
         return this.buildTextSearchStatement(
+          key,
           value as TextSearchValue,
-          columnKey
+          columnStatement
         );
       } else {
-        return new Fragment(`($1:raw)${typeCast} ${compRaw} $2`, [
-          columnKey,
-          myValue,
-        ]);
+        const columnStatement = this.buildColumnStatement(myValue, type, 1);
+        return new Fragment(`${columnStatement} ${compRaw} $2`, [key, myValue]);
       }
     };
     const allowedOps = Object.keys(LogicalMap);

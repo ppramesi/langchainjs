@@ -8,7 +8,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import pgPromise, { IDatabase } from "pg-promise";
-import { OpenAIEmbeddings } from "../../embeddings/openai.js";
+import { FakeEmbeddings } from "../../embeddings/fake.js";
 import { PGVectorStore } from "../pg.js";
 
 /**
@@ -65,16 +65,35 @@ beforeAll(async () => {
 beforeEach(async () => {
   /**
    * 🚨🚨🚨 WARNING WARNING WARNING 🚨🚨🚨
-   * We're dropping pg_embeddings table first to make sure the tests
-   * are idempotent. This means that if you have a table called
-   * pg_embeddings in your database, it will be dropped.
+   * We're dropping pg_embeddings and other tables first to make
+   * sure the tests are idempotent. This means that if you have
+   * a table called pg_embeddings (and similar names) in your
+   * database, it will be dropped.
    */
   await Promise.all([
     pgvsPgvector.none("DROP TABLE IF EXISTS pg_embeddings"),
+    pgvsPgvector
+      .none("DROP TABLE IF EXISTS pg_embeddings_test_join;")
+      .then(() => pgvsPgvector.none("DROP TABLE IF EXISTS some_extra_stuff;")),
+    pgvsPgvector
+      .none("DROP TABLE IF EXISTS injection_test;")
+      .then(() =>
+        pgvsPgvector.none("DROP TABLE IF EXISTS injection_some_extra_stuff;")
+      ),
     pgvsPgembedding.none("DROP TABLE IF EXISTS pg_embeddings"),
+    pgvsPgembedding
+      .none("DROP TABLE IF EXISTS pg_embeddings_test_join;")
+      .then(() =>
+        pgvsPgembedding.none("DROP TABLE IF EXISTS some_extra_stuff;")
+      ),
+    pgvsPgembedding
+      .none("DROP TABLE IF EXISTS injection_test;")
+      .then(() =>
+        pgvsPgembedding.none("DROP TABLE IF EXISTS injection_some_extra_stuff;")
+      ),
   ]);
 
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
 
   const pgvKnexVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgvector,
@@ -84,7 +103,7 @@ beforeEach(async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgvector", dims: 1536 },
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
   const pgeKnexVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgembedding,
@@ -94,7 +113,7 @@ beforeEach(async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+    pgExtensionOpts: { type: "pgembedding", dims: 4 },
   });
 
   await Promise.all([
@@ -104,9 +123,34 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  /**
+   * 🚨🚨🚨 WARNING WARNING WARNING 🚨🚨🚨
+   * We're dropping pg_embeddings and other tables first to make
+   * sure the tests are idempotent. This means that if you have
+   * a table called pg_embeddings (and similar names) in your
+   * database, it will be dropped.
+   */
   await Promise.all([
     pgvsPgvector.none("DROP TABLE IF EXISTS pg_embeddings"),
+    pgvsPgvector
+      .none("DROP TABLE IF EXISTS pg_embeddings_test_join;")
+      .then(() => pgvsPgvector.none("DROP TABLE IF EXISTS some_extra_stuff;")),
+    pgvsPgvector
+      .none("DROP TABLE IF EXISTS injection_test;")
+      .then(() =>
+        pgvsPgvector.none("DROP TABLE IF EXISTS injection_some_extra_stuff;")
+      ),
     pgvsPgembedding.none("DROP TABLE IF EXISTS pg_embeddings"),
+    pgvsPgembedding
+      .none("DROP TABLE IF EXISTS pg_embeddings_test_join;")
+      .then(() =>
+        pgvsPgembedding.none("DROP TABLE IF EXISTS some_extra_stuff;")
+      ),
+    pgvsPgembedding
+      .none("DROP TABLE IF EXISTS injection_test;")
+      .then(() =>
+        pgvsPgembedding.none("DROP TABLE IF EXISTS injection_some_extra_stuff;")
+      ),
   ]);
 });
 
@@ -115,7 +159,7 @@ afterAll(async () => {
 });
 
 test("Build index pgvector", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
@@ -124,7 +168,7 @@ test("Build index pgvector", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgvector", dims: 1536 },
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
   try {
@@ -138,7 +182,7 @@ test("Build index pgvector", async () => {
 });
 
 test("MMR and Similarity Search Test pgvector", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
@@ -147,7 +191,7 @@ test("MMR and Similarity Search Test pgvector", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgvector", dims: 1536 },
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
   const createdAt = new Date().getTime();
@@ -210,7 +254,7 @@ test("MMR and Similarity Search Test pgvector", async () => {
 });
 
 test("Building WHERE query test pgvector", () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
@@ -219,7 +263,7 @@ test("Building WHERE query test pgvector", () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgvector", dims: 1536 },
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
   const queryMetadata = pgVS.buildSqlFilterStr(
@@ -247,7 +291,7 @@ test("Building WHERE query test pgvector", () => {
   );
 
   expect(JSON.stringify(queryMetadata)).toBe(
-    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"(((metadata->>$1)::text = $2 OR (metadata->>$3)::text = $4 OR ((metadata->>$5)::text = $6 AND to_tsvector($7, (metadata->>$8)::text) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 
   const queryColumn = pgVS.buildSqlFilterStr(
@@ -275,12 +319,12 @@ test("Building WHERE query test pgvector", () => {
   );
 
   expect(JSON.stringify(queryColumn)).toBe(
-    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"(($1:alias = $2 OR $3:alias = $4 OR ($5:alias = $6 AND to_tsvector($7, $8:alias) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 });
 
 test("MMR and Similarity Search with filter Test pgvector", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
@@ -289,7 +333,7 @@ test("MMR and Similarity Search with filter Test pgvector", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgvector", dims: 1536 },
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
   const createdAt = new Date().getTime();
@@ -361,7 +405,7 @@ test("MMR and Similarity Search with filter Test pgvector", async () => {
 });
 
 test("MMR and Similarity Search with filter + join Test pgvector", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   // create some_other_stuff table with pg-promise
   await pgvsPgvector.none(
     "CREATE TABLE IF NOT EXISTS some_extra_stuff (id serial PRIMARY KEY, type varchar(16))"
@@ -387,7 +431,7 @@ test("MMR and Similarity Search with filter + join Test pgvector", async () => {
           references: { table: "some_extra_stuff", column: "id" },
         },
       ],
-      pgExtensionOpts: { type: "pgvector", dims: 1536 },
+      pgExtensionOpts: { type: "pgvector", dims: 4 },
     });
 
     await pgVS.ensureTableInDatabase();
@@ -489,7 +533,7 @@ test("MMR and Similarity Search with filter + join Test pgvector", async () => {
 });
 
 test("Text search test pgvector", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgvector,
     useHnswIndex: true,
@@ -498,7 +542,7 @@ test("Text search test pgvector", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgvector", dims: 1536 },
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
   const createdAt = new Date().getTime();
@@ -563,7 +607,7 @@ test("Text search test pgvector", async () => {
 });
 
 test("Build index pgembedding", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
@@ -572,7 +616,7 @@ test("Build index pgembedding", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+    pgExtensionOpts: { type: "pgembedding", dims: 4 },
   });
 
   try {
@@ -586,7 +630,7 @@ test("Build index pgembedding", async () => {
 });
 
 test("MMR and Similarity Search Test pgembedding", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
@@ -595,7 +639,7 @@ test("MMR and Similarity Search Test pgembedding", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+    pgExtensionOpts: { type: "pgembedding", dims: 4 },
   });
 
   const createdAt = new Date().getTime();
@@ -658,7 +702,7 @@ test("MMR and Similarity Search Test pgembedding", async () => {
 });
 
 test("Building WHERE query test pgembedding", () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
@@ -667,7 +711,7 @@ test("Building WHERE query test pgembedding", () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+    pgExtensionOpts: { type: "pgembedding", dims: 4 },
   });
 
   const queryMetadata = pgVS.buildSqlFilterStr(
@@ -695,7 +739,7 @@ test("Building WHERE query test pgembedding", () => {
   );
 
   expect(JSON.stringify(queryMetadata)).toBe(
-    '["WHERE",{"query":"((($1:raw)::text = $2 OR ($3:raw)::text = $4 OR (($5:raw)::text = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["metadata->>\'stuff\'","hello","metadata->>\'hello\'","stuff","metadata->>\'hello\'","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"(((metadata->>$1)::text = $2 OR (metadata->>$3)::text = $4 OR ((metadata->>$5)::text = $6 AND to_tsvector($7, (metadata->>$8)::text) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 
   const queryColumn = pgVS.buildSqlFilterStr(
@@ -723,12 +767,12 @@ test("Building WHERE query test pgembedding", () => {
   );
 
   expect(JSON.stringify(queryColumn)).toBe(
-    '["WHERE",{"query":"((($1:raw) = $2 OR ($3:raw) = $4 OR (($5:raw) = $6 AND to_tsvector($7, $8:raw) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
+    '["WHERE",{"query":"(($1:alias = $2 OR $3:alias = $4 OR ($5:alias = $6 AND to_tsvector($7, $8:alias) @@ plainto_tsquery($9, $10))))","values":["stuff","hello","hello","stuff","hello","stuff","english","content","english","hello"]}]'
   );
 });
 
 test("MMR and Similarity Search with filter Test pgembedding", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
@@ -737,7 +781,7 @@ test("MMR and Similarity Search with filter Test pgembedding", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+    pgExtensionOpts: { type: "pgembedding", dims: 4 },
   });
 
   const createdAt = new Date().getTime();
@@ -809,7 +853,7 @@ test("MMR and Similarity Search with filter Test pgembedding", async () => {
 });
 
 test("MMR and Similarity Search with filter + join Test pgembedding", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   // create some_other_stuff table with pg-promise
   await pgvsPgembedding.none(
     "CREATE TABLE IF NOT EXISTS some_extra_stuff (id serial PRIMARY KEY, type varchar(16))"
@@ -835,7 +879,7 @@ test("MMR and Similarity Search with filter + join Test pgembedding", async () =
           references: { table: "some_extra_stuff", column: "id" },
         },
       ],
-      pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+      pgExtensionOpts: { type: "pgembedding", dims: 4 },
     });
 
     await pgVS.ensureTableInDatabase();
@@ -937,7 +981,7 @@ test("MMR and Similarity Search with filter + join Test pgembedding", async () =
 });
 
 test("Text search test pgembedding", async () => {
-  const embedding = new OpenAIEmbeddings();
+  const embedding = new FakeEmbeddings();
   const pgVS = new PGVectorStore(embedding, {
     postgresConnectionOptions: pgvsPgembedding,
     useHnswIndex: true,
@@ -946,7 +990,7 @@ test("Text search test pgembedding", async () => {
       contentColumnName: "content",
     },
     extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
-    pgExtensionOpts: { type: "pgembedding", dims: 1536 },
+    pgExtensionOpts: { type: "pgembedding", dims: 4 },
   });
 
   const createdAt = new Date().getTime();
@@ -1008,4 +1052,240 @@ test("Text search test pgembedding", async () => {
   });
 
   expect(results.length).toBe(1);
+});
+
+test("SQL Injection Test 1", async () => {
+  const embedding = new FakeEmbeddings();
+  // create some_other_stuff table with pg-promise
+  await pgvsPgvector.none(
+    "CREATE TABLE IF NOT EXISTS injection_some_extra_stuff (id serial PRIMARY KEY, type varchar(16))"
+  );
+  // add some data to some_other_stuff table.
+  await pgvsPgvector.none(
+    "INSERT INTO injection_some_extra_stuff (type) VALUES ('its'), ('me'), ('hi'), ('im'), ('the'), ('problem'), ('its'), ('me')"
+  );
+
+  const pgVS = new PGVectorStore(embedding, {
+    postgresConnectionOptions: pgvsPgvector,
+    useHnswIndex: true,
+    tableName: "injection_test",
+    columns: {
+      contentColumnName: "content",
+    },
+    extraColumns: [
+      {
+        name: "injection_some_extra_column",
+        type: "integer",
+        returned: true,
+        references: { table: "injection_some_extra_stuff", column: "id" },
+      },
+    ],
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
+  });
+
+  const createdAt = new Date().getTime();
+
+  const docs = [
+    {
+      pageContent: "This is a long text",
+      metadata: { b: 1, c: 10, stuff: "right", created_at: createdAt },
+    },
+    {
+      pageContent: "This is a long text",
+      metadata: { b: 2, c: 9, stuff: "right", created_at: createdAt },
+    },
+    {
+      pageContent: "hello",
+      metadata: { b: 1, c: 9, stuff: "right", created_at: createdAt },
+    },
+  ];
+
+  await pgVS.addDocuments(docs, {
+    extraColumns: [{ extra_stuff: 1 }, { extra_stuff: 2 }, { extra_stuff: 3 }],
+  });
+
+  try {
+    await pgVS.maxMarginalRelevanceSearch("hello", {
+      k: 3,
+      fetchK: 3,
+      filter: {
+        columnFilter: {
+          "extra_stuff = 'weeewooo'); DROP TABLE injection_test; --": {
+            $eq: "hi",
+          },
+        },
+      },
+    });
+
+    const result = await pgvsPgvector.any(
+      "SELECT * FROM information_schema.tables WHERE table_name = $1",
+      ["injection_test"]
+    );
+    if (result.length === 0) {
+      expect("This is bad").toBe("Injection should have failed");
+    } else {
+      expect(true).toBe(true);
+    }
+  } catch (error) {
+    expect(true).toBe(true);
+  }
+});
+
+test("SQL Injection Test 2", async () => {
+  const embedding = new FakeEmbeddings();
+  // create some_other_stuff table with pg-promise
+  await pgvsPgvector.none(
+    "CREATE TABLE IF NOT EXISTS injection_some_extra_stuff (id serial PRIMARY KEY, type varchar(16))"
+  );
+  // add some data to some_other_stuff table.
+  await pgvsPgvector.none(
+    "INSERT INTO injection_some_extra_stuff (type) VALUES ('its'), ('me'), ('hi'), ('im'), ('the'), ('problem'), ('its'), ('me')"
+  );
+
+  const pgVS = new PGVectorStore(embedding, {
+    postgresConnectionOptions: pgvsPgvector,
+    useHnswIndex: true,
+    tableName: "injection_test",
+    columns: {
+      contentColumnName: "content",
+    },
+    extraColumns: [
+      {
+        name: "injection_some_extra_column",
+        type: "integer",
+        returned: true,
+        references: { table: "injection_some_extra_stuff", column: "id" },
+      },
+    ],
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
+  });
+
+  const createdAt = new Date().getTime();
+
+  const docs = [
+    {
+      pageContent: "This is a long text",
+      metadata: { b: 1, c: 10, stuff: "right", created_at: createdAt },
+    },
+    {
+      pageContent: "This is a long text",
+      metadata: { b: 2, c: 9, stuff: "right", created_at: createdAt },
+    },
+    {
+      pageContent: "hello",
+      metadata: { b: 1, c: 9, stuff: "right", created_at: createdAt },
+    },
+  ];
+
+  await pgVS.addDocuments(docs, {
+    extraColumns: [{ extra_stuff: 1 }, { extra_stuff: 2 }, { extra_stuff: 3 }],
+  });
+
+  try {
+    await pgVS.maxMarginalRelevanceSearch("hello", {
+      k: 3,
+      fetchK: 3,
+      filter: {
+        metadataFilter: {
+          "'b' = 'weeewooo'); DROP TABLE injection_test; --": { $eq: "hi" },
+        },
+      },
+    });
+
+    const result = await pgvsPgvector.any(
+      "SELECT * FROM information_schema.tables WHERE table_name = $1",
+      ["injection_test"]
+    );
+    if (result.length === 0) {
+      expect("This is bad").toBe("Injection should have failed");
+    } else {
+      expect(true).toBe(true);
+    }
+  } catch (error) {
+    expect(true).toBe(true);
+  }
+});
+
+test("SQL Injection Test 3", async () => {
+  const embedding = new FakeEmbeddings();
+  // create some_other_stuff table with pg-promise
+  await pgvsPgvector.none(
+    "CREATE TABLE IF NOT EXISTS injection_some_extra_stuff (id serial PRIMARY KEY, type varchar(16))"
+  );
+  // add some data to some_other_stuff table.
+  await pgvsPgvector.none(
+    "INSERT INTO injection_some_extra_stuff (type) VALUES ('its'), ('me'), ('hi'), ('im'), ('the'), ('problem'), ('its'), ('me')"
+  );
+
+  const pgVS = new PGVectorStore(embedding, {
+    postgresConnectionOptions: pgvsPgvector,
+    useHnswIndex: true,
+    tableName: "injection_test",
+    columns: {
+      contentColumnName: "content",
+    },
+    extraColumns: [
+      {
+        name: "injection_some_extra_column",
+        type: "integer",
+        returned: true,
+        references: { table: "injection_some_extra_stuff", column: "id" },
+      },
+    ],
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
+  });
+
+  const createdAt = new Date().getTime();
+
+  const docs = [
+    {
+      pageContent: "This is a long text",
+      metadata: { b: 1, c: 10, stuff: "right", created_at: createdAt },
+    },
+    {
+      pageContent: "This is a long text",
+      metadata: { b: 2, c: 9, stuff: "right", created_at: createdAt },
+    },
+    {
+      pageContent: "hello",
+      metadata: { b: 1, c: 9, stuff: "right", created_at: createdAt },
+    },
+  ];
+
+  await pgVS.addDocuments(docs, {
+    extraColumns: [{ extra_stuff: 1 }, { extra_stuff: 2 }, { extra_stuff: 3 }],
+  });
+
+  try {
+    await pgVS.maxMarginalRelevanceSearch("hello", {
+      k: 3,
+      fetchK: 3,
+      filter: {
+        join: {
+          op: "JOIN",
+          table: "injection_some_extra_stuff",
+          on: [
+            {
+              left: "injection_test.injection_some_extra_column",
+              right:
+                "injection_some_extra_stuff.id; DROP TABLE injection_test; --",
+              operator: "=",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await pgvsPgvector.any(
+      "SELECT * FROM information_schema.tables WHERE table_name = $1",
+      ["injection_test"]
+    );
+    if (result.length === 0) {
+      expect("This is bad").toBe("Injection should have failed");
+    } else {
+      expect(true).toBe(true);
+    }
+  } catch (error) {
+    expect(true).toBe(true);
+  }
 });
