@@ -626,6 +626,31 @@ export class PGVectorStore<
     }
   }
 
+  /**
+   * Static method to create a new `PGVectorStore` instance from a
+   * connection. It creates a table if one does not exist, and calls
+   * `connect` to return a new instance of `PGVectorStore`.
+   *
+   * @param embeddings - Embeddings instance.
+   * @param fields - `PGVectorStoreArgs` instance.
+   * @returns A new instance of `PGVectorStore`.
+   */
+  static async initialize(
+    embeddings: Embeddings,
+    config: PGVectorStoreArgs
+  ): Promise<PGVectorStore> {
+    const postgresqlVectorStore = new PGVectorStore(embeddings, config);
+
+    await postgresqlVectorStore._initializeClient();
+    await postgresqlVectorStore.ensureTableInDatabase();
+
+    return postgresqlVectorStore;
+  }
+
+  protected async _initializeClient() {
+    await this.pgInstance.connect();
+  }
+
   _vectorstoreType(): string {
     return "pg";
   }
@@ -653,8 +678,6 @@ export class PGVectorStore<
       extraColumns: (ColumnValue | null)[];
     }
   ): Promise<void> {
-    await this.ensureTableInDatabase();
-
     const chunkSize = 1000;
     for (let i = 0; i < vectors.length; i += chunkSize) {
       const chunkVectors = vectors.slice(i, i + chunkSize);
@@ -718,32 +741,61 @@ export class PGVectorStore<
     await this.pgInstance.none('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
 
     const columns = [
-      `${this.idColumnName} uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY`,
-      `${this.pageContentColumnName} text`,
-      `${this.metadataColumnName} jsonb`,
-      `${this.vectorColumnName} ${this.pgExtension.buildDataType()}`,
+      `$2:name uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY`,
+      `$3:name text`,
+      `$4:name jsonb`,
+      `$5:name ${this.pgExtension.buildDataType()}`,
     ];
 
-    const extraColumns = this.extraColumns.map(
-      ({ name, type, notNull, references }) => {
-        let refString = "";
-        if (references) {
-          if (typeof references === "string") {
-            refString = ` REFERENCES ${references}`;
-          } else {
-            refString = ` REFERENCES ${references.table} (${references.column})`;
-          }
-        }
-        return `${name} ${type}${notNull ? " NOT NULL" : ""}${refString}`;
-      }
-    );
+    const params = [
+      this.idColumnName,
+      this.pageContentColumnName,
+      this.metadataColumnName,
+      this.vectorColumnName,
+    ];
+    let parameterCount = 5;
 
-    await this.pgInstance.none(`
-      CREATE TABLE IF NOT EXISTS ${this.tableName} (${[
-      ...columns,
-      ...extraColumns,
-    ].join(", ")});
-    `);
+    const extraColumns = [];
+
+    for (let i = 0; i < this.extraColumns.length; i += 1) {
+      const { name, type, notNull, references } = this.extraColumns[i];
+      let refString = "";
+      const refParams = [];
+      let adder = 2;
+      if (references) {
+        if (typeof references === "string") {
+          refString = ` REFERENCES $${parameterCount + 3}:name`;
+          refParams.push(references);
+          adder = 3;
+        } else {
+          refString = ` REFERENCES $${parameterCount + 3}:name ($${
+            parameterCount + 4
+          }:name)`;
+          refParams.push(references.table);
+          refParams.push(references.column);
+          adder = 4;
+        }
+      }
+
+      extraColumns.push(
+        `$${parameterCount + 1}:name $${parameterCount + 2}:alias${
+          notNull ? " NOT NULL" : ""
+        }${refString}`
+      );
+      params.push(name);
+      params.push(type);
+      params.push(...refParams);
+      parameterCount += adder;
+    }
+
+    await this.pgInstance.none(
+      `
+      CREATE TABLE IF NOT EXISTS $1:name (${[...columns, ...extraColumns].join(
+        ", "
+      )});
+    `,
+      [this.tableName, ...params]
+    );
   }
 
   private buildJoinStatement(statement: JoinStatement): Fragment {
@@ -815,7 +867,7 @@ export class PGVectorStore<
         }
       } else if (rest && Object.keys(rest).length > 0) {
         filterStatement = new Fragment(`WHERE $1:name @> $2`, [
-          this.vectorColumnName,
+          this.metadataColumnName,
           rest,
         ]);
       }
@@ -952,7 +1004,6 @@ export class PGVectorStore<
       efSearch?: number;
     } = {}
   ): Promise<void> {
-    await this.ensureTableInDatabase();
     await this.pgInstance.none(
       this.pgExtension.buildHNSWIndexStatement(
         indexName,
@@ -968,7 +1019,6 @@ export class PGVectorStore<
   }
 
   async dropIndex(indexName: string): Promise<void> {
-    await this.ensureTableInDatabase();
     await this.pgInstance.none(`DROP INDEX IF EXISTS ${indexName};`);
   }
 
@@ -1114,5 +1164,34 @@ export class PGVectorStore<
 
     if (built.query.length === 0) return null;
     return ["WHERE", built];
+  }
+
+  /**
+   * Static method to create a new `PGVectorStore` instance from an
+   * array of `Document` instances. It adds the documents to the store.
+   *
+   * @param docs - Array of `Document` instances.
+   * @param embeddings - Embeddings instance.
+   * @param dbConfig - `PGVectorStoreArgs` instance.
+   * @returns Promise that resolves with a new instance of `PGVectorStore`.
+   */
+  static async fromDocuments(
+    docs: Document[],
+    embeddings: Embeddings,
+    dbConfig: PGVectorStoreArgs
+  ): Promise<PGVectorStore> {
+    const instance = await PGVectorStore.initialize(embeddings, dbConfig);
+    await instance.addDocuments(docs);
+
+    return instance;
+  }
+
+  /**
+   * Closes all the clients in the pool and terminates the pool.
+   *
+   * @returns Promise that resolves when all clients are closed and the pool is terminated.
+   */
+  async end(): Promise<void> {
+    return this.pgInstance.$pool.end();
   }
 }

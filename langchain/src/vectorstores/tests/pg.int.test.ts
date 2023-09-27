@@ -1083,6 +1083,8 @@ test("SQL Injection Test 1", async () => {
     pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
+  await pgVS.ensureTableInDatabase();
+
   const createdAt = new Date().getTime();
 
   const docs = [
@@ -1118,7 +1120,7 @@ test("SQL Injection Test 1", async () => {
     });
 
     const result = await pgvsPgvector.any(
-      "SELECT * FROM information_schema.tables WHERE table_name = $1",
+      "SELECT * FROM information_schema.tables WHERE table_name = $1;",
       ["injection_test"]
     );
     if (result.length === 0) {
@@ -1160,6 +1162,8 @@ test("SQL Injection Test 2", async () => {
     pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
 
+  await pgVS.ensureTableInDatabase();
+
   const createdAt = new Date().getTime();
 
   const docs = [
@@ -1193,7 +1197,7 @@ test("SQL Injection Test 2", async () => {
     });
 
     const result = await pgvsPgvector.any(
-      "SELECT * FROM information_schema.tables WHERE table_name = $1",
+      "SELECT * FROM information_schema.tables WHERE table_name = $1;",
       ["injection_test"]
     );
     if (result.length === 0) {
@@ -1234,6 +1238,8 @@ test("SQL Injection Test 3", async () => {
     ],
     pgExtensionOpts: { type: "pgvector", dims: 4 },
   });
+
+  await pgVS.ensureTableInDatabase();
 
   const createdAt = new Date().getTime();
 
@@ -1277,7 +1283,7 @@ test("SQL Injection Test 3", async () => {
     });
 
     const result = await pgvsPgvector.any(
-      "SELECT * FROM information_schema.tables WHERE table_name = $1",
+      "SELECT * FROM information_schema.tables WHERE table_name = $1;",
       ["injection_test"]
     );
     if (result.length === 0) {
