@@ -1,5 +1,5 @@
 /* eslint-disable no-loop-func */
-import pgPromise, { IDatabase, ITask } from "pg-promise";
+import pgPromise, { IBaseProtocol, IDatabase } from "pg-promise";
 import { MaxMarginalRelevanceSearchOptions, VectorStore } from "./base.js";
 import { Embeddings } from "../embeddings/base.js";
 import { Document } from "../document.js";
@@ -149,9 +149,9 @@ export type ExtensionOpts<T extends Record<string, unknown>> = {
   dims?: number;
 
   /**
-   * The PG instance to use.
+   * The pg-promise client to use.
    */
-  pgDb: IDatabase<TableShape<T>>;
+  pgDb: IBaseProtocol<TableShape<T>>;
 };
 
 const ComparisonMap = {
@@ -175,7 +175,7 @@ type LogicalMapKey = keyof typeof LogicalMap;
 type ColumnValue = { [K: string]: any };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PGQuery<R> = (t: IDatabase<any> | ITask<any>) => Promise<R>;
+type PGQuery<R> = (t: IBaseProtocol<any>) => Promise<R>;
 
 export type HNSWIndexStatementOpts = {
   /**
@@ -209,7 +209,7 @@ export abstract class PostgresEmbeddingExtension<
    */
   dims: number;
 
-  pgInstance: IDatabase<TableShape<Columns>>;
+  pgInstance: IBaseProtocol<TableShape<Columns>>;
 
   constructor(extensionOpts: ExtensionOpts<Columns>) {
     const metric = extensionOpts.metric ?? "cosine";
@@ -285,7 +285,7 @@ export abstract class PostgresEmbeddingExtension<
   ): string;
 
   abstract runQueryWrapper<R>(
-    dbInstance: IDatabase<TableShape<Columns>>,
+    dbInstance: IBaseProtocol<TableShape<Columns>>,
     query: PGQuery<R>
   ): Promise<R>;
 }
@@ -389,7 +389,7 @@ export class PGEmbeddingExt<
    * @returns
    */
   runQueryWrapper<R>(
-    dbInstance: IDatabase<TableShape<Columns>>,
+    dbInstance: IBaseProtocol<TableShape<Columns>>,
     query: PGQuery<R>
   ): Promise<R> {
     return dbInstance.tx(async (t) => {
@@ -493,7 +493,7 @@ export class PGVectorExt<
   }
 
   runQueryWrapper<R>(
-    dbInstance: IDatabase<TableShape<Columns>>,
+    dbInstance: IBaseProtocol<TableShape<Columns>>,
     query: PGQuery<R>
   ): Promise<R> {
     return query(dbInstance);
@@ -520,7 +520,7 @@ export interface PGVectorStoreArgs<
   T extends Record<string, unknown> = Record<string, unknown>
 > {
   postgresConnectionOptions:
-    | IDatabase<TableShape<T>>
+    | IBaseProtocol<TableShape<T>>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     | Record<string, any>
     | string;

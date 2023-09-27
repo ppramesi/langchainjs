@@ -1,20 +1,62 @@
-import pgPromise from "pg-promise";
+import { type IBaseProtocol } from "pg-promise";
 import { OpenAIEmbeddings } from "langchain/embeddings/openai";
 import { PGVectorStore } from "langchain/vectorstores/pg";
 
-const pgp = pgPromise();
-const pgInstance = pgp({
-  database: "db",
-  user: "postgres",
-  password: "postgres",
-  max: 20,
-  host: "localhost",
-});
+/**
+ * You can extend PGVectorStore and change how the query runs to
+ * make it work with RLS. As an example, if you're using Supabase's
+ * RLS feature, you can extend PGVectorStore like so:
+ */
+
+export class SupabasePGVectorStore extends PGVectorStore {
+  jwt?: Record<string, any>;
+
+  setJWT(jwt: Record<string, any>) {
+    this.jwt = jwt;
+  }
+
+  unsetJWT() {
+    this.jwt = undefined;
+  }
+
+  protected runQuery<R>(
+    query: (t: IBaseProtocol<any>) => Promise<R>
+  ): Promise<R> {
+    return this.pgInstance.tx((t) => {
+      const claimsSetting = "request.jwt.claims";
+      const claims = JSON.stringify(this.jwt);
+      return (
+        t
+          .query(`SELECT set_config($1, $2, true);`, [claimsSetting, claims])
+          /**
+           * You might want to use this.pgExtension.runQueryWrapper(t, query)
+           * if you're using pg_embedding, since it needs to add
+           * SET LOCAL enable_seqscan = off; in the query for some reason.
+           * If you're using pgvector, you can just do
+           * .then(() => query(t));
+           */
+          .then(() => this.pgExtension.runQueryWrapper(t, query))
+      );
+    });
+  }
+}
 
 export async function run() {
+  const pgConfig = {
+    database: "db",
+    user: "postgres",
+    password: "postgres",
+    max: 20,
+    host: "localhost",
+    port: 5432,
+  };
+
   const embedding = new OpenAIEmbeddings();
   const vectorStore = new PGVectorStore(embedding, {
-    postgresConnectionOptions: pgInstance,
+    /**
+     * You can pass either a pg-promise client, postgres url or postgres configuration object.
+     */
+    postgresConnectionOptions: pgConfig,
     useHnswIndex: false,
     tableName: "pg_embeddings",
     columns: {
@@ -62,20 +104,25 @@ export async function run() {
      * PostgresEmbeddingExtension which can be extended. See the source code
      * for implementation details.
      *
-     * see https://github.com/ppramesi/vector-pg-tests/blob/main/database_pgvector/Dockerfile
-     * and https://github.com/ppramesi/vector-pg-tests/blob/main/database_pgembedding/Dockerfile
+     * see /examples/src/indexes/vector_stores/pg_vectorstore/pgvector/Dockerfile
+     * and /examples/src/indexes/vector_stores/pg_vectorstore/pgembedding/Dockerfile
      * if you need pointers on how to add pgvector or pgembedding to your postgresql.
      */
     pgExtensionOpts: {
       // optional, defaults to pgvector with 1536 dims and cosine metric
       type: "pgvector", // can be "pgvector", "pgembedding"
       dims: 1536, // optional, defaults to 1536
-      metric: "cosine", // optional, defaults to "cosine"
+      metric: "cosine", // optional, defaults to "cosine". can be "cosine", "l2" and "manhattan" for pgembedding, and "cosine", "l2" and "inner_product" for pgvector
     }, // it can also be PGEmbeddingExt or PGVectorExt instance instead of an object
   });
 
   /**
-   * ...then create HNSW index
+   * ..then add tables to the database.
+   */
+  await vectorStore.ensureTableInDatabase();
+
+  /**
+   * ...and then create HNSW index
    */
   await vectorStore.buildIndex("hnsw_index", {
     m: 16, // the max number of connections per layer (16 by default)
@@ -107,8 +154,8 @@ export async function run() {
 
   /**
    * Similarity search can either be based om column filtering or
-   * metadata filtering. The shape of the filter query is exactly
-   * the same as ChromaDB and Pinecone filter query.
+   * metadata filtering (exclusively). The shape of the filter query
+   * is exactly the same as ChromaDB and Pinecone filter query.
    * see https://docs.trychroma.com/usage-guide#using-where-filters
    */
   await vectorStore.similaritySearch("This is a long text", 1, {
@@ -123,12 +170,14 @@ export async function run() {
   });
 
   /**
-   * Similarity search can also be a regular JSON, which will be
-   * converted to a WHERE query on metadata with "contains" operator.
-   * e.g. WHERE metadata @> '{"stuff": "right"}'
+   * If the filter does not contain "columnFilter" or "metadataFilter",
+   * then it will be treated as a metadata filter. Specifically, it will
+   * be treated as a metadata filter with "contains" operator.
+   * e.g. WHERE metadata @> '{"b": 2, "c": 9"}'
    */
   await vectorStore.similaritySearch("This is a long text", 1, {
-    stuff: "right",
+    b: 2,
+    c: 9,
   });
 
   /**
@@ -139,10 +188,6 @@ export async function run() {
       /**
        * content is the column name for pageContent in the DB, but can be changed to anything
        * by setting pageContentColumn when defining it in KnexVectorStoreArgs.
-       *
-       * Note: the name of the column can be a vector for SQL injection attacks since the name
-       * of the column is injected straight raw into the SQL query without sanitizing. So make
-       * sure to not let users define the name of the column from the client side.
        */
       content: {
         $textSearch: { query: "'vector' & 'database'", config: "english" },

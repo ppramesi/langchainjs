@@ -13,8 +13,8 @@ import { PGVectorStore } from "../pg.js";
 
 /**
  * We're using two different postgres instances for each extension. Should setup with docker,
- * see https://github.com/ppramesi/vector-pg-tests/blob/main/database_pgvector/Dockerfile
- * and https://github.com/ppramesi/vector-pg-tests/blob/main/database_pgembedding/Dockerfile
+ * see /examples/src/indexes/vector_stores/pg_vectorstore/pgvector/Dockerfile
+ * and /examples/src/indexes/vector_stores/pg_vectorstore/pgembedding/Dockerfile
  * for dockerfile configs.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
