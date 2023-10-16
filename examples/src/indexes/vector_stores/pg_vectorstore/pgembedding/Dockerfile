@@ -7,6 +7,9 @@ RUN apt-get update -y && \
       ca-certificates \
       build-essential \
       postgresql-server-dev-all \
+      make \
+      gcc \
+      g++ \
       libicu-dev \
       libpam0g-dev \
       zlib1g-dev \
@@ -23,19 +26,18 @@ ENV LC_ALL en_US.UTF-8
 
 # Install pg_vector
 RUN cd /tmp && \
-    git clone https://github.com/pgvector/pgvector.git && \
-    cd pgvector && \
+    git clone https://github.com/neondatabase/pg_embedding.git && \
+    cd pg_embedding && \
     make && \
     make install && \
-    rm -rf /tmp/pgvector
+    rm -rf /tmp/pg_embedding
 
 RUN echo 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >> /docker-entrypoint-initdb.d/uuid-ossp.sql
-RUN echo 'CREATE EXTENSION IF NOT EXISTS vector;' >> /docker-entrypoint-initdb.d/vector.sql
+RUN echo 'CREATE EXTENSION IF NOT EXISTS embedding;' >> /docker-entrypoint-initdb.d/vector.sql
 
 # Clean up
 RUN apt-get remove -y --auto-remove \
       build-essential \
-      postgresql-server-dev-all \
       libicu-dev \
       libpam0g-dev \
       zlib1g-dev \
