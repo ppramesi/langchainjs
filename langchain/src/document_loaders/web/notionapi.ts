@@ -14,6 +14,7 @@ import type {
   ListBlockChildrenResponseResults,
   MdBlock,
 } from "notion-to-md/build/types";
+import yaml from "js-yaml";
 
 import { Document } from "../../document.js";
 import { BaseDocumentLoader } from "../base.js";
@@ -75,6 +76,7 @@ export type NotionAPILoaderOptions = {
   type?: NotionAPIType; // @deprecated `type` property is now automatically determined.
   callerOptions?: ConstructorParameters<typeof AsyncCaller>[0];
   onDocumentLoaded?: OnDocumentLoadedCallback;
+  propertiesAsHeader?: boolean;
 };
 
 /**
@@ -102,6 +104,8 @@ export class NotionAPILoader extends BaseDocumentLoader {
 
   private onDocumentLoaded: OnDocumentLoadedCallback;
 
+  private propertiesAsHeader: boolean;
+
   constructor(options: NotionAPILoaderOptions) {
     super();
 
@@ -124,6 +128,7 @@ export class NotionAPILoader extends BaseDocumentLoader {
     this.documents = [];
     this.rootTitle = "";
     this.onDocumentLoaded = options.onDocumentLoaded ?? ((_ti, _cu) => {});
+    this.propertiesAsHeader = options.propertiesAsHeader || false;
   }
 
   /**
@@ -144,10 +149,18 @@ export class NotionAPILoader extends BaseDocumentLoader {
    * @returns The string of the title.
    */
   private getTitle(obj: GetResponse) {
-    if (isPage(obj) && obj.properties.title.type === "title") {
-      return obj.properties.title.title[0]?.plain_text;
+    if (isPage(obj)) {
+      const titleProp = Object.values(obj.properties).find(
+        (prop) => prop.type === "title"
+      );
+      if (titleProp) return this.getPropValue(titleProp);
     }
-    if (isDatabase(obj)) return obj.title[0]?.plain_text;
+    if (isDatabase(obj))
+      return obj.title
+        .map((v) =>
+          this.n2mClient.annotatePlainText(v.plain_text, v.annotations)
+        )
+        .join("");
     return null;
   }
 
@@ -332,21 +345,38 @@ export class NotionAPILoader extends BaseDocumentLoader {
       this.caller.call(() => getBlockChildren(this.notionClient, pageId, null)),
     ]);
 
-    if (!isFullPage(pageDetails)) return;
+    if (!isFullPage(pageDetails)) {
+      this.pageCompleted.push(pageId);
+      return;
+    }
 
     const mdBlocks = await this.loadBlocks(pageBlocks);
     const mdStringObject = this.n2mClient.toMarkdownString(mdBlocks);
-    const pageDocument = new Document({
-      pageContent: mdStringObject.parent,
-      metadata: this.parsePageDetails(pageDetails),
-    });
+
+    let pageContent = mdStringObject.parent;
+    const metadata = this.parsePageDetails(pageDetails);
+
+    if (this.propertiesAsHeader) {
+      pageContent =
+        `---\n` +
+        `${yaml.dump(metadata.properties)}` +
+        `---\n\n` +
+        `${pageContent ?? ""}`;
+    }
+
+    if (!pageContent) {
+      this.pageCompleted.push(pageId);
+      return;
+    }
+
+    const pageDocument = new Document({ pageContent, metadata });
 
     this.documents.push(pageDocument);
     this.pageCompleted.push(pageId);
     this.onDocumentLoaded(
       this.documents.length,
       this.pageQueueTotal,
-      pageDocument.metadata.properties.title,
+      this.getTitle(pageDetails) || undefined,
       this.rootTitle
     );
   }
