@@ -675,7 +675,8 @@ export class PGVectorStore<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     documents: Document<Record<string, any>>[],
     options?: {
-      extraColumns: (ColumnValue | null)[];
+      extraColumns?: (ColumnValue | null)[];
+      ids?: string[];
     }
   ): Promise<void> {
     const chunkSize = 1000;
@@ -706,14 +707,28 @@ export class PGVectorStore<
           ...extraColumns,
         };
 
+        if (options?.ids?.[idx]) {
+          documentRow[this.idColumnName] = options.ids[idx];
+        }
+
         return documentRow;
       });
 
       await this.runQuery((database) => {
+        const exclCols = Object.keys(rows[0])
+          .map((key) => `${key} = EXCLUDED.${key}`)
+          .join(", ");
+
         const columnSet = new pgp.helpers.ColumnSet(Object.keys(rows[0]), {
           table: this.tableName,
         });
-        const insertQuery = pgp.helpers.insert(rows, columnSet);
+
+        const insertQuery = `${pgp.helpers.insert(
+          rows,
+          columnSet
+        )} ON CONFLICT (${
+          this.idColumnName
+        }) DO UPDATE SET ${exclCols} RETURNING ${this.idColumnName}`;
         return database.none(insertQuery);
       });
     }
