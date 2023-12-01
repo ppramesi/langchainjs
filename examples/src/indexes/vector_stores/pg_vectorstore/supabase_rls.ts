@@ -1,5 +1,6 @@
 import { type IBaseProtocol } from "pg-promise";
 import { PGVectorStore } from "langchain/vectorstores/pg";
+import { OpenAIEmbeddings } from "langchain/embeddings/openai";
 
 /**
  * You can extend PGVectorStore and change how the query runs to
@@ -7,7 +8,7 @@ import { PGVectorStore } from "langchain/vectorstores/pg";
  * RLS feature, you can extend PGVectorStore like so:
  */
 
-export class SupabasePGVectorStore extends PGVectorStore {
+class SupabasePGVectorStore extends PGVectorStore {
   jwt?: Record<string, any>;
 
   setJWT(jwt: Record<string, any>) {
@@ -39,3 +40,50 @@ export class SupabasePGVectorStore extends PGVectorStore {
     });
   }
 }
+
+const pgConfig = {
+  database: "db",
+  user: "postgres",
+  password: "postgres",
+  max: 20,
+  host: "localhost",
+  port: 5432,
+};
+
+const embedding = new OpenAIEmbeddings();
+const vectorStore = new SupabasePGVectorStore(embedding, {
+  postgresConnectionOptions: pgConfig,
+  useHnswIndex: false,
+  tableName: "pg_embeddings",
+  columns: {
+    contentColumnName: "content",
+  },
+  extraColumns: [
+    {
+      name: "extra_stuff",
+      type: "text",
+      returned: true,
+      notNull: true,
+    },
+    {
+      name: "some_table_id",
+      type: "integer",
+      returned: false,
+      references: "some_table",
+    },
+  ],
+  pgExtensionOpts: {
+    type: "pgvector",
+    dims: 1536,
+    metric: "cosine",
+  },
+});
+
+vectorStore.setJWT({
+  "sub": "testestestest",
+  "role": "user",
+  "key": "somekeytest"
+});
+const result = await vectorStore.similaritySearch("This is a long text", 1);
+
+console.log(result);

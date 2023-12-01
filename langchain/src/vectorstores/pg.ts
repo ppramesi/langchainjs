@@ -21,40 +21,40 @@ class Fragment {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let combinedValues: any[] = [];
     let placeholderOffset = 0;
-  
+
     for (const fragment of fragments) {
       if (fragment == null) continue;
       // eslint-disable-next-line no-instanceof/no-instanceof
       if (fragment instanceof Fragment) {
         if (!fragment.query || fragment.query.length === 0) continue;
         let reparametrizedQuery = fragment.query;
-  
+
         if (fragment.values && fragment.values.length > 0) {
           reparametrizedQuery = fragment.query.replace(
             /\$(\d+)/g,
             (_, n) => `$${parseInt(n, 10) + placeholderOffset}`
           );
-  
+
           combinedValues = combinedValues.concat(fragment.values);
           placeholderOffset += fragment.values.length;
         }
-  
+
         queryArray.push(reparametrizedQuery);
       } else {
         if (!fragment || fragment.length === 0) continue;
         queryArray.push(fragment);
       }
     }
-  
+
     const newQuery = `${enclosed ? "(" : ""}${queryArray.join(joiner).trim()}${
       enclosed ? ")" : ""
     }`;
-  
+
     return new Fragment(
       newQuery,
       combinedValues.length > 0 ? combinedValues : undefined
     );
-  };
+  }
 }
 
 export type FilterValue = string | number;
@@ -261,7 +261,7 @@ export abstract class PostgresEmbeddingExtension<
    * Build the SQL statement to get the data type of the embedding column
    * the chosen embedding extension uses.
    */
-  abstract buildDataType(): string;
+  abstract buildDataTypeStatement(): string;
 
   /**
    * Build the SQL statement to insert a vector into the database.
@@ -338,7 +338,7 @@ export class PGEmbeddingExt<
     return "CREATE EXTENSION IF NOT EXISTS embedding;";
   }
 
-  buildDataType(): string {
+  buildDataTypeStatement(): string {
     return "REAL[]";
   }
 
@@ -447,7 +447,7 @@ export class PGVectorExt<
     return "CREATE EXTENSION IF NOT EXISTS vector;";
   }
 
-  buildDataType(): string {
+  buildDataTypeStatement(): string {
     return `vector(${this.dims})`;
   }
 
@@ -726,9 +726,7 @@ export class PGVectorStore<
         const insertQuery = `${pgp.helpers.insert(
           rows,
           columnSet
-        )} ON CONFLICT (${
-          this.idColumnName
-        }) DO UPDATE SET ${exclCols} RETURNING ${this.idColumnName}`;
+        )} ON CONFLICT (${this.idColumnName}) DO UPDATE SET ${exclCols}`;
         return database.none(insertQuery);
       });
     }
@@ -759,7 +757,7 @@ export class PGVectorStore<
       `$2:name uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY`,
       `$3:name text`,
       `$4:name jsonb`,
-      `$5:name ${this.pgExtension.buildDataType()}`,
+      `$5:name ${this.pgExtension.buildDataTypeStatement()}`,
     ];
 
     const params = [
@@ -1175,7 +1173,11 @@ export class PGVectorStore<
       return fragmentList;
     };
 
-    const built = Fragment.combineFragments(recursiveBuild(filter), ` AND `, true);
+    const built = Fragment.combineFragments(
+      recursiveBuild(filter),
+      ` AND `,
+      true
+    );
 
     if (built.query.length === 0) return null;
     return ["WHERE", built];
