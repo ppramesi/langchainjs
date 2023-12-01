@@ -9,7 +9,7 @@ import {
 } from "../../chains/query_constructor/ir.js";
 import { Document } from "../../document.js";
 import { BaseTranslator } from "./base.js";
-import { castValue, isFilterEmpty } from "./utils.js";
+import { castValue, isFilterEmpty } from "../../util/type_utils.js";
 
 /**
  * A type alias for an object that maps comparison operators to string or

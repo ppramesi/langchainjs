@@ -114,6 +114,7 @@
     "./langchain/src/vectorstores/qdrant.ts",
     "./langchain/src/vectorstores/supabase.ts",
     "./langchain/src/vectorstores/opensearch.ts",
+    "./langchain/src/vectorstores/pg.ts",
     "./langchain/src/vectorstores/pgvector.ts",
     "./langchain/src/vectorstores/milvus.ts",
     "./langchain/src/vectorstores/neo4j_vector.ts",

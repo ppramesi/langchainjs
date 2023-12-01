@@ -11,7 +11,7 @@ import {
 } from "../../chains/query_constructor/ir.js";
 import { VectaraFilter, VectaraStore } from "../../vectorstores/vectara.js";
 import { BaseTranslator } from "./base.js";
-import { isFilterEmpty } from "./utils.js";
+import { isFilterEmpty } from "../../util/type_utils.js";
 
 type AllowedOperator = Exclude<Operator, NOT>;
 

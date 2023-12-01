@@ -60,6 +60,7 @@ export const optionalImportEntrypoints = [
   "langchain/vectorstores/qdrant",
   "langchain/vectorstores/supabase",
   "langchain/vectorstores/opensearch",
+  "langchain/vectorstores/pg",
   "langchain/vectorstores/pgvector",
   "langchain/vectorstores/milvus",
   "langchain/vectorstores/neo4j_vector",

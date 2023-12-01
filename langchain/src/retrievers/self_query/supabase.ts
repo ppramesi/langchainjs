@@ -13,7 +13,7 @@ import type {
   SupabaseVectorStore,
 } from "../../vectorstores/supabase.js";
 import { BaseTranslator } from "./base.js";
-import { isFilterEmpty, isFloat, isInt, isObject, isString } from "./utils.js";
+import { isFilterEmpty, isFloat, isInt, isObject, isString } from "../../util/type_utils.js";
 import {
   ProxyParamsDuplicator,
   convertObjectFilterToStructuredQuery,

@@ -11,7 +11,7 @@ import {
 } from "../../chains/query_constructor/ir.js";
 import { WeaviateFilter, WeaviateStore } from "../../vectorstores/weaviate.js";
 import { BaseTranslator } from "./base.js";
-import { isFilterEmpty, isString, isInt, isFloat } from "./utils.js";
+import { isFilterEmpty, isString, isInt, isFloat } from "../../util/type_utils.js";
 
 type AllowedOperator = Exclude<Operator, NOT>;
 
