@@ -736,7 +736,8 @@ export class PGVectorStore<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     documents: Document<Record<string, any>>[],
     options?: {
-      extraColumns: (ColumnValue | null)[];
+      extraColumns?: (ColumnValue | null)[];
+      ids?: string[];
     }
   ): Promise<void | string[]> {
     const texts = documents.map(({ pageContent }) => pageContent);
@@ -960,14 +961,29 @@ export class PGVectorStore<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<[Document<Record<string, any>>, number][]> {
     const rows = await this.fetchRows(query, k, filter);
-    return rows.map((row) => [
-      new Document({
-        pageContent: row[this.pageContentColumnName] as string,
+    return rows.map((row) => {
+      const extraColumns = this.extraColumns.reduce(
+        (acc, { name, returned }) => {
+          if (returned && row[name]) {
+            acc[name] = row[name];
+          }
+          return acc;
+        },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        metadata: row[this.metadataColumnName] as Record<string, any>,
-      }),
-      row._distance,
-    ]);
+        {} as Record<string, any>
+      );
+      return [
+        new Document({
+          pageContent: row[this.pageContentColumnName] as string,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          metadata: {
+            ...row[this.metadataColumnName],
+            ...extraColumns,
+          } as Record<string, any>,
+        }),
+        row._distance,
+      ];
+    });
   }
 
   async maxMarginalRelevanceSearch(

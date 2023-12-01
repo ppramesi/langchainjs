@@ -8,6 +8,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import pgPromise, { IDatabase } from "pg-promise";
+import { v4 } from "uuid";
 import { FakeEmbeddings } from "../../embeddings/fake.js";
 import { PGVectorStore } from "../pg.js";
 
@@ -179,6 +180,49 @@ test("Build index pgvector", async () => {
   } finally {
     await pgVS.dropIndex("test_hnsw_index");
   }
+});
+
+test("Upsert test", async () => {
+  const embedding = new FakeEmbeddings();
+  const pgVS = new PGVectorStore(embedding, {
+    postgresConnectionOptions: pgvsPgvector,
+    useHnswIndex: false,
+    tableName: "pg_embeddings",
+    columns: {
+      contentColumnName: "content",
+    },
+    extraColumns: [{ name: "extra_stuff", type: "text", returned: true }],
+    pgExtensionOpts: { type: "pgvector", dims: 4 },
+  });
+
+  const docs = [
+    {
+      pageContent: "hello",
+      metadata: { b: 1, c: 10 },
+    },
+    {
+      pageContent: "hoooo",
+      metadata: { b: 2, c: 9 },
+    },
+  ];
+  const id1 = v4();
+  const id2 = v4();
+
+  await pgVS.addDocuments(docs, {
+    extraColumns: [{ extra_stuff: "hello 1" }, { extra_stuff: "hello 2" }],
+    ids: [id1, id2],
+  });
+
+  await pgVS.addDocuments(docs, {
+    extraColumns: [{ extra_stuff: "hello 3" }, { extra_stuff: "hello 4" }],
+    ids: [id1, id2],
+  });
+
+  const results = await pgVS.similaritySearch("hello 1", 2);
+  expect(results.map((l) => l.metadata?.extra_stuff)).toEqual([
+    "hello 3",
+    "hello 4",
+  ]);
 });
 
 test("MMR and Similarity Search Test pgvector", async () => {
