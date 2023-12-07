@@ -202,7 +202,7 @@ export type HNSWIndexStatementOpts = {
 export abstract class PostgresEmbeddingExtension<
   Columns extends Record<string, unknown> = Record<string, unknown>
 > {
-  selectedMetric: Metric;
+  metric: Metric;
 
   /**
    * The number of dimensions of the embeddings.
@@ -214,7 +214,7 @@ export abstract class PostgresEmbeddingExtension<
   constructor(extensionOpts: ExtensionOpts<Columns>) {
     const metric = extensionOpts.metric ?? "cosine";
     this.validateSelectedMetric(metric);
-    this.selectedMetric = metric;
+    this.metric = metric;
     this.dims = extensionOpts.dims ?? 1536; // defaults to OpenAI 1536 embedding dims
     this.pgInstance = extensionOpts.pgDb;
   }
@@ -304,16 +304,16 @@ export class PGEmbeddingExt<
     returns: string[],
     disambiguate?: boolean
   ): Fragment {
-    let arrow;
-    switch (this.selectedMetric) {
+    let embeddingStatement;
+    switch (this.metric) {
       case "cosine":
-        arrow = "<=>";
+        embeddingStatement = `$1:name <=> $2:value`;
         break;
       case "l2":
-        arrow = "<->";
+        embeddingStatement = `$1:name <-> $2:value`;
         break;
       case "manhattan":
-        arrow = "<~>";
+        embeddingStatement = `$1:name <~> $2:value`;
         break;
       default:
         throw new Error("Invalid metric");
@@ -329,7 +329,7 @@ export class PGEmbeddingExt<
     }
 
     return new Fragment(
-      `SELECT ${selectStatement}, $1:name ${arrow} $2:value AS "_distance" FROM $3:name`,
+      `SELECT ${selectStatement}, ${embeddingStatement} AS "_distance" FROM $3:name`,
       [vectorColumnName, `array[${vector.join(",")}]`, tableName]
     );
   }
@@ -362,7 +362,7 @@ export class PGEmbeddingExt<
     if (efSearch) opts.push(`efsearch = ${efSearch}`);
 
     let ops;
-    switch (this.selectedMetric) {
+    switch (this.metric) {
       case "cosine":
         ops = " ann_cos_ops";
         break;
@@ -414,15 +414,15 @@ export class PGVectorExt<
     disambiguate?: boolean
   ): Fragment {
     let embeddingStatement;
-    switch (this.selectedMetric) {
+    switch (this.metric) {
       case "cosine":
-        embeddingStatement = `1 - ($1:name <=> $2::vector)`;
+        embeddingStatement = `$1:name <=> $2::vector`;
         break;
       case "l2":
         embeddingStatement = `$1:name <-> $2::vector`;
         break;
       case "inner_product":
-        embeddingStatement = `($1:name <#> $2::vector) * -1`;
+        embeddingStatement = `$1:name <#> $2::vector`;
         break;
       default:
         throw new Error("Invalid metric");
@@ -474,7 +474,7 @@ export class PGVectorExt<
     }
 
     let ops;
-    switch (this.selectedMetric) {
+    switch (this.metric) {
       case "cosine":
         ops = " vector_cosine_ops";
         break;
