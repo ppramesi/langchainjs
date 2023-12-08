@@ -13,7 +13,7 @@ import {
   FakeEmbeddings,
   NormalizedSyntheticEmbeddings,
 } from "../../embeddings/fake.js";
-import { PGVectorStore } from "../pg.js";
+import { PGVectorStore, JoinStatement } from "../pg.js";
 
 /**
  * We're using two different postgres instances for each extension. Should setup with docker,
@@ -546,7 +546,7 @@ describe("pgvector tests", () => {
               operator: "=",
             },
           ],
-        },
+        } as JoinStatement,
         columnFilter: {
           "some_extra_stuff.type": { $eq: "hello" },
         },
@@ -568,7 +568,7 @@ describe("pgvector tests", () => {
                 operator: "=",
               },
             ],
-          },
+          } as JoinStatement,
           columnFilter: {
             "some_extra_stuff.type": { $eq: "hello" },
           },
@@ -1164,7 +1164,7 @@ describe("pgembedding tests", () => {
               operator: "=",
             },
           ],
-        },
+        } as JoinStatement,
         columnFilter: {
           "some_extra_stuff.type": { $eq: "hello" },
         },
@@ -1186,7 +1186,7 @@ describe("pgembedding tests", () => {
                 operator: "=",
               },
             ],
-          },
+          } as JoinStatement,
           columnFilter: {
             "some_extra_stuff.type": { $eq: "hello" },
           },
@@ -1682,7 +1682,7 @@ describe("injection tests", () => {
                 operator: "=",
               },
             ],
-          },
+          } as JoinStatement,
         },
       });
 

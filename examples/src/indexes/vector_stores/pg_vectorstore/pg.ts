@@ -1,5 +1,5 @@
 import { OpenAIEmbeddings } from "langchain/embeddings/openai";
-import { PGVectorStore } from "langchain/vectorstores/pg";
+import { PGVectorStore, JoinStatement } from "langchain/vectorstores/pg";
 
 const pgConfig = {
   database: "db",
@@ -171,7 +171,7 @@ await vectorStore.similaritySearch("This is a long text", 1, {
         right: "pg_embeddings.id",
       },
     ],
-  },
+  } as JoinStatement,
 });
 
 /**
