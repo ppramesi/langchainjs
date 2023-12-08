@@ -15,7 +15,7 @@ services:
 
   db_pgembedding:
     build:
-      context: ./database_pgembedding
+      context: ./pgembedding
       dockerfile: Dockerfile
     environment:
       POSTGRES_USER: ${POSTGRES_PGEMBEDDING_USER}
