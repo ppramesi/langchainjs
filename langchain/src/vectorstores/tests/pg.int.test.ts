@@ -1,5 +1,4 @@
 /* eslint-disable no-process-env */
-import { Document } from "../../document.js";
 import {
   test,
   expect,
@@ -10,60 +9,11 @@ import {
 } from "@jest/globals";
 import pgPromise, { IDatabase } from "pg-promise";
 import { v4 } from "uuid";
-import { FakeEmbeddings, SyntheticEmbeddings } from "../../embeddings/fake.js";
+import {
+  FakeEmbeddings,
+  NormalizedSyntheticEmbeddings,
+} from "../../embeddings/fake.js";
 import { PGVectorStore } from "../pg.js";
-
-class NormalizedSyntheticEmbeddings extends SyntheticEmbeddings {
-  normalizeVector(vector: number[]): number[] {
-    let norm = Math.sqrt(vector.reduce((acc, val) => acc + val * val, 0));
-    if (norm === 0) {
-      return vector;
-    }
-
-    return vector.map((val) => val / norm);
-  }
-
-  /**
-   * Generates a synthetic embedding for a document. The document is
-   * converted into chunks, a numerical value is calculated for each chunk,
-   * and an array of these values is returned as the embedding.
-   * @param document The document to generate an embedding for.
-   * @returns A promise that resolves with a synthetic embedding for the document.
-   */
-  async embedQuery(document: string): Promise<number[]> {
-    let doc = document;
-
-    // Only use the letters (and space) from the document, and make them lower case
-    doc = doc.toLowerCase().replaceAll(/[^a-z ]/g, "");
-
-    // Pad the document to make sure it has a divisible number of chunks
-    const padMod = doc.length % this.vectorSize;
-    const padGapSize = padMod === 0 ? 0 : this.vectorSize - padMod;
-    const padSize = doc.length + padGapSize;
-    doc = doc.padEnd(padSize, " ");
-
-    // Break it into chunks
-    const chunkSize = doc.length / this.vectorSize;
-    const docChunk = [];
-    for (let co = 0; co < doc.length; co += chunkSize) {
-      docChunk.push(doc.slice(co, co + chunkSize));
-    }
-
-    // Turn each chunk into a number
-    const ret: number[] = docChunk.map((s) => {
-      let sum = 0;
-      // Get a total value by adding the value of each character in the string
-      for (let co = 0; co < s.length; co += 1) {
-        sum += s === " " ? 0 : s.charCodeAt(co);
-      }
-      // the only change, since we need the vectors to be normalized for testing cosine distance
-      const ret = ((sum % 26) - 13) / 13;
-      return ret;
-    });
-
-    return this.normalizeVector(ret);
-  }
-}
 
 /**
  * We're using two different postgres instances for each extension. Should setup with docker,
@@ -708,7 +658,7 @@ describe("pgvector tests", () => {
     expect(results.length).toBe(1);
   });
 
-  test("Metric test pgvector", async () => {
+  test("Cosine Metric test pgvector", async () => {
     const embedding = new NormalizedSyntheticEmbeddings({ vectorSize: 10 });
     const pgVS = new PGVectorStore(embedding, {
       postgresConnectionOptions: pgvsPgvector,
@@ -744,26 +694,136 @@ describe("pgvector tests", () => {
         metadata: { b: 2, c: 8, stuff: "right" },
       },
       {
-        pageContent: "ffffffffffffffffffff",
+        pageContent: "fffffffffffffffffffxx",
         metadata: { b: 3, c: 7, stuff: "right" },
       },
       {
-        pageContent: "gggggggggggggggggggg",
+        pageContent: "yyggggggggggggggggggg",
         metadata: { b: 4, c: 6, stuff: "right" },
       },
     ];
 
-    const getPageContent = (docs: Document<Record<string, any>>[]) =>
-      docs.map((doc) => doc.pageContent);
     await pgVS.addDocuments(docs);
-    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 2);
-    expect(getPageContent(resultsA)).toContain("aaaaaaaaaaaaaaaaaaaa");
-    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 2);
-    expect(getPageContent(resultsB)).toContain("poiuytrewqasdfghjklm");
-    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 2);
-    expect(getPageContent(resultsC)).toContain("mnbvcxzasdfghjkloiuy");
-    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 2);
-    expect(getPageContent(resultsD)).toContain("alskdjfhvngbthrycisudj");
+    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 1);
+    expect(resultsA[0].pageContent).toEqual("aaaaaaaaaaaaaaaaaaaa");
+    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 1);
+    expect(resultsB[0].pageContent).toEqual("poiuytrewqasdfghjklm");
+    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 1);
+    expect(resultsC[0].pageContent).toEqual("mnbvcxzasdfghjkloiuy");
+    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 1);
+    expect(resultsD[0].pageContent).toEqual("alskdjfhvngbthrycisudj");
+  });
+
+  test("L2 Metric test pgvector", async () => {
+    const embedding = new NormalizedSyntheticEmbeddings({ vectorSize: 10 });
+    const pgVS = new PGVectorStore(embedding, {
+      postgresConnectionOptions: pgvsPgvector,
+      useHnswIndex: false,
+      tableName: "pg_embeddings_metric_test",
+      columns: {
+        contentColumnName: "content",
+      },
+      pgExtensionOpts: { type: "pgvector", dims: 10, metric: "l2" },
+    });
+
+    await pgVS.ensureTableInDatabase();
+
+    const docs = [
+      {
+        pageContent: "aaaaaaaaaaaaaaaaaaaa",
+        metadata: { b: 1, c: 10, stuff: "right" },
+      },
+      {
+        pageContent: "poiuytrewqasdfghjklm",
+        metadata: { b: 2, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "mnbvcxzasdfghjkloiuy",
+        metadata: { b: 1, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "alskdjfhvngbthrycisudj",
+        metadata: { b: 1, c: 9, stuff: "wrong" },
+      },
+      {
+        pageContent: "eeeeeeeeeeeeeeeeeeee",
+        metadata: { b: 2, c: 8, stuff: "right" },
+      },
+      {
+        pageContent: "fffffffffffffffffffxx",
+        metadata: { b: 3, c: 7, stuff: "right" },
+      },
+      {
+        pageContent: "yyggggggggggggggggggg",
+        metadata: { b: 4, c: 6, stuff: "right" },
+      },
+    ];
+
+    await pgVS.addDocuments(docs);
+    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 1);
+    expect(resultsA[0].pageContent).toEqual("aaaaaaaaaaaaaaaaaaaa");
+    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 1);
+    expect(resultsB[0].pageContent).toEqual("poiuytrewqasdfghjklm");
+    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 1);
+    expect(resultsC[0].pageContent).toEqual("mnbvcxzasdfghjkloiuy");
+    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 1);
+    expect(resultsD[0].pageContent).toEqual("alskdjfhvngbthrycisudj");
+  });
+
+  test("Inner Product Metric test pgvector", async () => {
+    const embedding = new NormalizedSyntheticEmbeddings({ vectorSize: 10 });
+    const pgVS = new PGVectorStore(embedding, {
+      postgresConnectionOptions: pgvsPgvector,
+      useHnswIndex: false,
+      tableName: "pg_embeddings_metric_test",
+      columns: {
+        contentColumnName: "content",
+      },
+      pgExtensionOpts: { type: "pgvector", dims: 10, metric: "inner_product" },
+    });
+
+    await pgVS.ensureTableInDatabase();
+
+    const docs = [
+      {
+        pageContent: "aaaaaaaaaaaaaaaaaaaa",
+        metadata: { b: 1, c: 10, stuff: "right" },
+      },
+      {
+        pageContent: "poiuytrewqasdfghjklm",
+        metadata: { b: 2, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "mnbvcxzasdfghjkloiuy",
+        metadata: { b: 1, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "alskdjfhvngbthrycisudj",
+        metadata: { b: 1, c: 9, stuff: "wrong" },
+      },
+      {
+        pageContent: "eeeeeeeeeeeeeeeeeeee",
+        metadata: { b: 2, c: 8, stuff: "right" },
+      },
+      {
+        pageContent: "fffffffffffffffffffxx",
+        metadata: { b: 3, c: 7, stuff: "right" },
+      },
+      {
+        pageContent: "yyggggggggggggggggggg",
+        metadata: { b: 4, c: 6, stuff: "right" },
+      },
+    ];
+
+    await pgVS.addDocuments(docs);
+    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 1);
+    expect(resultsA[0].pageContent).toEqual("aaaaaaaaaaaaaaaaaaaa");
+    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 1);
+    expect(resultsB[0].pageContent).toEqual("poiuytrewqasdfghjklm");
+    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 1);
+    expect(resultsC[0].pageContent).toEqual("mnbvcxzasdfghjkloiuy");
+    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 1);
+    expect(resultsD[0].pageContent).toEqual("alskdjfhvngbthrycisudj");
   });
 });
 
@@ -1216,7 +1276,7 @@ describe("pgembedding tests", () => {
     expect(results.length).toBe(1);
   });
 
-  test("Metric test pgembedding", async () => {
+  test("Cosine Metric test pgembedding", async () => {
     const embedding = new NormalizedSyntheticEmbeddings({ vectorSize: 20 });
     const pgVS = new PGVectorStore(embedding, {
       postgresConnectionOptions: pgvsPgembedding,
@@ -1252,26 +1312,136 @@ describe("pgembedding tests", () => {
         metadata: { b: 2, c: 8, stuff: "right" },
       },
       {
-        pageContent: "ffffffffffffffffffff",
+        pageContent: "fffffffffffffffffffxx",
         metadata: { b: 3, c: 7, stuff: "right" },
       },
       {
-        pageContent: "gggggggggggggggggggg",
+        pageContent: "yyggggggggggggggggggg",
         metadata: { b: 4, c: 6, stuff: "right" },
       },
     ];
 
-    const getPageContent = (docs: Document<Record<string, any>>[]) =>
-      docs.map((doc) => doc.pageContent);
     await pgVS.addDocuments(docs);
-    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 2);
-    expect(getPageContent(resultsA)).toContain("aaaaaaaaaaaaaaaaaaaa");
-    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 2);
-    expect(getPageContent(resultsB)).toContain("poiuytrewqasdfghjklm");
-    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 2);
-    expect(getPageContent(resultsC)).toContain("mnbvcxzasdfghjkloiuy");
-    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 2);
-    expect(getPageContent(resultsD)).toContain("alskdjfhvngbthrycisudj");
+    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 1);
+    expect(resultsA[0].pageContent).toEqual("aaaaaaaaaaaaaaaaaaaa");
+    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 1);
+    expect(resultsB[0].pageContent).toEqual("poiuytrewqasdfghjklm");
+    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 1);
+    expect(resultsC[0].pageContent).toEqual("mnbvcxzasdfghjkloiuy");
+    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 1);
+    expect(resultsD[0].pageContent).toEqual("alskdjfhvngbthrycisudj");
+  });
+
+  test("L2 Metric test pgembedding", async () => {
+    const embedding = new NormalizedSyntheticEmbeddings({ vectorSize: 20 });
+    const pgVS = new PGVectorStore(embedding, {
+      postgresConnectionOptions: pgvsPgembedding,
+      useHnswIndex: false,
+      tableName: "pg_embeddings_metric_test",
+      columns: {
+        contentColumnName: "content",
+      },
+      pgExtensionOpts: { type: "pgembedding", dims: 20, metric: "l2" },
+    });
+
+    await pgVS.ensureTableInDatabase();
+
+    const docs = [
+      {
+        pageContent: "aaaaaaaaaaaaaaaaaaaa",
+        metadata: { b: 1, c: 10, stuff: "right" },
+      },
+      {
+        pageContent: "poiuytrewqasdfghjklm",
+        metadata: { b: 2, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "mnbvcxzasdfghjkloiuy",
+        metadata: { b: 1, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "alskdjfhvngbthrycisudj",
+        metadata: { b: 1, c: 9, stuff: "wrong" },
+      },
+      {
+        pageContent: "eeeeeeeeeeeeeeeeeeee",
+        metadata: { b: 2, c: 8, stuff: "right" },
+      },
+      {
+        pageContent: "fffffffffffffffffffxx",
+        metadata: { b: 3, c: 7, stuff: "right" },
+      },
+      {
+        pageContent: "yyggggggggggggggggggg",
+        metadata: { b: 4, c: 6, stuff: "right" },
+      },
+    ];
+
+    await pgVS.addDocuments(docs);
+    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 1);
+    expect(resultsA[0].pageContent).toEqual("aaaaaaaaaaaaaaaaaaaa");
+    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 1);
+    expect(resultsB[0].pageContent).toEqual("poiuytrewqasdfghjklm");
+    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 1);
+    expect(resultsC[0].pageContent).toEqual("mnbvcxzasdfghjkloiuy");
+    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 1);
+    expect(resultsD[0].pageContent).toEqual("alskdjfhvngbthrycisudj");
+  });
+
+  test("Manhattan Metric test pgembedding", async () => {
+    const embedding = new NormalizedSyntheticEmbeddings({ vectorSize: 20 });
+    const pgVS = new PGVectorStore(embedding, {
+      postgresConnectionOptions: pgvsPgembedding,
+      useHnswIndex: false,
+      tableName: "pg_embeddings_metric_test",
+      columns: {
+        contentColumnName: "content",
+      },
+      pgExtensionOpts: { type: "pgembedding", dims: 20, metric: "manhattan" },
+    });
+
+    await pgVS.ensureTableInDatabase();
+
+    const docs = [
+      {
+        pageContent: "aaaaaaaaaaaaaaaaaaaa",
+        metadata: { b: 1, c: 10, stuff: "right" },
+      },
+      {
+        pageContent: "poiuytrewqasdfghjklm",
+        metadata: { b: 2, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "mnbvcxzasdfghjkloiuy",
+        metadata: { b: 1, c: 9, stuff: "right" },
+      },
+      {
+        pageContent: "alskdjfhvngbthrycisudj",
+        metadata: { b: 1, c: 9, stuff: "wrong" },
+      },
+      {
+        pageContent: "eeeeeeeeeeeeeeeeeeee",
+        metadata: { b: 2, c: 8, stuff: "right" },
+      },
+      {
+        pageContent: "fffffffffffffffffffxx",
+        metadata: { b: 3, c: 7, stuff: "right" },
+      },
+      {
+        pageContent: "yyggggggggggggggggggg",
+        metadata: { b: 4, c: 6, stuff: "right" },
+      },
+    ];
+
+    await pgVS.addDocuments(docs);
+    const resultsA = await pgVS.similaritySearch("aaaaaaaaaaaaaaaaaaaa", 1);
+    expect(resultsA[0].pageContent).toEqual("aaaaaaaaaaaaaaaaaaaa");
+    const resultsB = await pgVS.similaritySearch("poiuytrewqasdfghjklm", 1);
+    expect(resultsB[0].pageContent).toEqual("poiuytrewqasdfghjklm");
+    const resultsC = await pgVS.similaritySearch("mnbvcxzasdfghjkloiuy", 1);
+    expect(resultsC[0].pageContent).toEqual("mnbvcxzasdfghjkloiuy");
+    const resultsD = await pgVS.similaritySearch("alskdjfhvngbthrycisudj", 1);
+    expect(resultsD[0].pageContent).toEqual("alskdjfhvngbthrycisudj");
   });
 });
 

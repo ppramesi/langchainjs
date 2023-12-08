@@ -105,3 +105,59 @@ export class SyntheticEmbeddings
     return ret;
   }
 }
+
+/**
+ * A class that does the exact same thing as SyntheticEmbeddings, but
+ * the vectors are normalized so that it can work with cosine distance.
+ */
+export class NormalizedSyntheticEmbeddings extends SyntheticEmbeddings {
+  normalizeVector(vector: number[]): number[] {
+    let norm = Math.sqrt(vector.reduce((acc, val) => acc + val * val, 0));
+    if (norm === 0) {
+      return vector;
+    }
+
+    return vector.map((val) => val / norm);
+  }
+
+  /**
+   * Generates a synthetic embedding for a document. The document is
+   * converted into chunks, a numerical value is calculated for each chunk,
+   * and an array of these values is returned as the embedding.
+   * @param document The document to generate an embedding for.
+   * @returns A promise that resolves with a synthetic embedding for the document.
+   */
+  async embedQuery(document: string): Promise<number[]> {
+    let doc = document;
+
+    // Only use the letters (and space) from the document, and make them lower case
+    doc = doc.toLowerCase().replaceAll(/[^a-z ]/g, "");
+
+    // Pad the document to make sure it has a divisible number of chunks
+    const padMod = doc.length % this.vectorSize;
+    const padGapSize = padMod === 0 ? 0 : this.vectorSize - padMod;
+    const padSize = doc.length + padGapSize;
+    doc = doc.padEnd(padSize, " ");
+
+    // Break it into chunks
+    const chunkSize = doc.length / this.vectorSize;
+    const docChunk = [];
+    for (let co = 0; co < doc.length; co += chunkSize) {
+      docChunk.push(doc.slice(co, co + chunkSize));
+    }
+
+    // Turn each chunk into a number
+    const ret: number[] = docChunk.map((s) => {
+      let sum = 0;
+      // Get a total value by adding the value of each character in the string
+      for (let co = 0; co < s.length; co += 1) {
+        sum += s === " " ? 13 : s.charCodeAt(co);
+      }
+      // the only change, since we need the vectors to be normalized for testing cosine distance
+      const ret = ((sum % 26) - 13) / 13;
+      return ret;
+    });
+
+    return this.normalizeVector(ret);
+  }
+}
