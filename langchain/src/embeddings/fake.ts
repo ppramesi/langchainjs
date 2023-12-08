@@ -112,7 +112,7 @@ export class SyntheticEmbeddings
  */
 export class NormalizedSyntheticEmbeddings extends SyntheticEmbeddings {
   normalizeVector(vector: number[]): number[] {
-    let norm = Math.sqrt(vector.reduce((acc, val) => acc + val * val, 0));
+    const norm = Math.sqrt(vector.reduce((acc, val) => acc + val * val, 0));
     if (norm === 0) {
       return vector;
     }

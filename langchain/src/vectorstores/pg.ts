@@ -72,10 +72,12 @@ export type TextSearchValue = {
 
 const allowedOperators = ["=", "<>", ">", ">=", "<", "<="] as const;
 
+type JoinOperators = (typeof allowedOperators)[number];
+
 export type OnCondition = {
   left: string;
   right: string;
-  operator?: "=" | "<>" | ">" | ">=" | "<" | "<=";
+  operator?: JoinOperators;
 };
 
 export type JoinStatement = {
@@ -975,10 +977,10 @@ export class PGVectorStore<
       return [
         new Document({
           pageContent: row[this.pageContentColumnName] as string,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           metadata: {
             ...row[this.metadataColumnName],
             ...extraColumns,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as Record<string, any>,
         }),
         row._distance,
